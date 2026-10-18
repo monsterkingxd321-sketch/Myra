@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Docker build context filter.
+#  Keeps secrets and local junk OUT of the image (and out of the layer cache).
+#  NOTE: anything not listed here IS copied into the image via `COPY . .`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── secrets — NEVER bake these into an image ────────────────────────────────
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+sessions/
+keyfile.txt
+keys.txt
+
+# ── version control / editors ───────────────────────────────────────────────
+.git
+.gitattributes
+.gitignore
+.idea/
+.vscode/
+*.swp
+
+# ── python build noise ──────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── runtime droppings (the bot recreates log.txt itself) ────────────────────
+log.txt
+*.log
+unknown_errors.txt
+
+# ── not needed inside the image ─────────────────────────────────────────────
+.dockerignore
+docker-compose.yml
+Dockerfile
+*.md
+LICENSE
+nixpacks.toml
+Procfile
+app.json
+render.yaml
+railway.json
+myrabot.service
+setup.sh
+start

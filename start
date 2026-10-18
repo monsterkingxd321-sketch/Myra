@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Tiny launcher used by `bash start` (VPS / local). Hosts run `python3 -u -m Myra`.
+set -e
+exec python3 -u -m Myra

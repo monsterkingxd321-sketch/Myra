@@ -1,0 +1,10 @@
+# Fallback build for hosts that use Nixpacks instead of the Dockerfile.
+# Railway defaults to the Dockerfile because railway.json asks for it.
+[phases.setup]
+nixPkgs = ["python311", "gcc", "libffi", "openssl"]
+
+[phases.install]
+cmds = ["python3 -m pip install --upgrade pip wheel", "pip install -r requirements.txt"]
+
+[start]
+cmd = "python3 -u -m Myra"

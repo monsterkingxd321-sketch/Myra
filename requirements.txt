@@ -1,0 +1,20 @@
+Abg==2.3.1
+# Kurigram is a maintained Pyrogram fork that speaks a current Telegram API
+# layer. An old layer (Pyrogram <=2.0.106 = layer 151/158) makes Telegram reject
+# every user login with `406 UPDATE_APP_TO_LOGIN`, so userbots can never be added
+# through the phone/OTP flow. Do NOT replace this with plain `pyrogram`, and do
+# not let anything install `pyrogram` on top of it — `tools/check_pyrogram.py`
+# (run during the Docker build) fails loudly if that ever happens.
+kurigram==2.2.24
+pymongo>=4.3.3
+motor>=3.1.1
+requests>=2.28.2
+dnspython>=2.3.0
+# 1.2.5 is the first TgCrypto release with cp310/cp311 wheels, so the image
+# builds without a C toolchain on linux/amd64. Kurigram itself allows <=1.2.5.
+tgcrypto==1.2.5
+python-dotenv>=1.0.0
+flask>=2.2.3
+aiohttp>=3.10.0
+google-genai>=1.0.0
+openai>=1.40.0

@@ -1,0 +1,77 @@
+{
+  "name": "Myra",
+  "description": "Hybrid Hinglish Telegram chatbot with multi-userbot AutoChat: MongoDB similarity search first, AI fallback second, auto-training back into the database.",
+  "keywords": [
+    "telegram",
+    "chatbot",
+    "mongodb",
+    "pyrogram",
+    "gemini",
+    "openai",
+    "userbot"
+  ],
+  "repository": "https://github.com/fifjrkrkrjrokrj-dotcom/AyushChatBot",
+  "stack": "container",
+  "env": {
+    "API_ID": {
+      "description": "Telegram API ID from https://my.telegram.org (API development tools).",
+      "required": true,
+      "value": ""
+    },
+    "API_HASH": {
+      "description": "Telegram API Hash from https://my.telegram.org.",
+      "required": true,
+      "value": ""
+    },
+    "BOT_TOKEN": {
+      "description": "Bot token from @BotFather.",
+      "required": true,
+      "value": ""
+    },
+    "OWNER_ID": {
+      "description": "Your numeric Telegram user id — this account gets /admin.",
+      "required": true,
+      "value": ""
+    },
+    "MONGO_URL": {
+      "description": "MongoDB that stores ONLY the chat/training brain (Word.WordDb). Free cluster: https://cloud.mongodb.com",
+      "required": true,
+      "value": ""
+    },
+    "BOT_MONGO_URL": {
+      "description": "OPTIONAL second MongoDB for everything the bot owns (users, chats, admins, userbot sessions, clones, settings, AI keys). Leave empty to reuse MONGO_URL.",
+      "required": false,
+      "value": ""
+    },
+    "GEMINI_API_KEYS": {
+      "description": "OPTIONAL. One or more Google Gemini API keys, comma separated (https://aistudio.google.com/apikey). Rotated automatically. Empty = database-only mode.",
+      "required": false,
+      "value": ""
+    },
+    "OPENAI_API_KEYS": {
+      "description": "OPTIONAL. One or more OpenAI / ChatGPT keys, comma separated. Works with any OpenAI-compatible proxy when OPENAI_BASE_URL is set.",
+      "required": false,
+      "value": ""
+    },
+    "OPENAI_BASE_URL": {
+      "description": "Endpoint used by the OpenAI provider. Point it at your proxy for free keys.",
+      "required": false,
+      "value": "https://api.openai.com/v1"
+    },
+    "AI_PROVIDER_ORDER": {
+      "description": "Which provider is asked first after the database misses.",
+      "required": false,
+      "value": "gemini,openai"
+    },
+    "AI_ENABLE": {
+      "description": "Enable the AI fallback at all (true/false).",
+      "required": false,
+      "value": "true"
+    },
+    "USERBOT_AUTOCHAT_DEFAULT": {
+      "description": "Start every newly added userbot with AutoChat ON (true/false).",
+      "required": false,
+      "value": "true"
+    }
+  }
+}

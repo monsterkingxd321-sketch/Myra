@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment and sensitive data
+.env
+sessions/
+*.session
+*.session-journal
+
+# Logs and IDEs
+log.txt
+*.log
+.idea/
+.vscode/
+*.local
+unknown_errors.txt

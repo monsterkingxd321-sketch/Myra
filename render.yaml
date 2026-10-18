@@ -1,0 +1,51 @@
+# Render blueprint — builds the repository Dockerfile.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# ⚠️ `plan: free` puts the service to sleep after 15 minutes of inactivity, which
+#    takes every userbot offline. Use `starter` (or higher) for real 24/7 hosting.
+services:
+  - type: web
+    name: myra-chatbot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    plan: starter
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: MONGO_URL
+        sync: false
+      - key: BOT_MONGO_URL
+        sync: false
+      - key: OWNER_USERNAME
+        sync: false
+      - key: GEMINI_API_KEYS
+        sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-2.0-flash"
+      - key: OPENAI_API_KEYS
+        sync: false
+      - key: OPENAI_BASE_URL
+        value: "https://api.openai.com/v1"
+      - key: AI_PROVIDER_ORDER
+        value: "gemini,openai"
+      - key: USERBOT_AUTOCHAT_DEFAULT
+        value: "true"
+      - key: AI_ENABLE
+        value: "true"
+      - key: AI_DB_FIRST
+        value: "true"
+      - key: AI_AUTO_TRAIN
+        value: "true"
+      - key: AI_GROUP_FALLBACK
+        value: "true"
+      - key: AI_SIMILARITY_THRESHOLD
+        value: "0.72"

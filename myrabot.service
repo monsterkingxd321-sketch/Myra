@@ -1,0 +1,26 @@
+[Unit]
+Description=Myra Multi-Userbot Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# 👇 change these two lines if you cloned the repo somewhere else
+WorkingDirectory=/root/Myra
+EnvironmentFile=/root/Myra/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/root/Myra/venv/bin/python3 -u -m Myra
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+# Logs go to journalctl:  journalctl -u myra -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myra
+
+[Install]
+WantedBy=multi-user.target
