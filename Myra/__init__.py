@@ -1,6 +1,30 @@
 import sys
 import logging 
 import time
+import importlib
+import importlib.util
+
+# ── Abg ⇄ Kurigram compatibility shim (MUST run before `from Abg import patch`) ─
+# Abg 2.3.1's `inline` package begins with `from pyrogram.emoji import *` and then
+# uses thirteen `FLAG_*` constants from it. `pyrogram/emoji.py` ships with stock
+# Pyrogram, but Kurigram — the maintained fork we have to use so Telegram stops
+# rejecting userbot logins with `406 UPDATE_APP_TO_LOGIN` — dropped that module.
+# On a *clean* install (Docker image, fresh VPS venv) the import below therefore
+# dies with:
+#
+#     ModuleNotFoundError: No module named 'pyrogram.emoji'
+#
+# A machine that once had stock Pyrogram installed still has the leftover file,
+# which is why the crash only ever showed up in the container.
+# `Myra/_compat/pyrogram_emoji.py` re-creates the handful of constants Abg needs;
+# when the real module is present we leave everything exactly as it was.
+if importlib.util.find_spec("pyrogram.emoji") is None:
+    import pyrogram as _pyrogram
+
+    _emoji_shim = importlib.import_module("Myra._compat.pyrogram_emoji")
+    sys.modules["pyrogram.emoji"] = _emoji_shim
+    setattr(_pyrogram, "emoji", _emoji_shim)
+
 from Abg import patch
 
 from motor.motor_asyncio import AsyncIOMotorClient as MongoCli

@@ -74,6 +74,18 @@ WORKDIR /app
 # .env, .git, *.session and the logs are excluded via .dockerignore
 COPY --chown=myra:myra . .
 
+# Build gate #2 — import the entire app exactly like `python -m Myra` does, on a
+# clean install with dummy credentials and no network. This is what catches
+# "it only worked on my machine because of a leftover file" bugs: a local venv
+# can still hold stock Pyrogram's `pyrogram/emoji.py`, which Kurigram dropped,
+# while `Abg` imports it. On the very first clean deploy that crashed the bot
+# with `ModuleNotFoundError: No module named 'pyrogram.emoji'`.
+RUN API_ID=1 \
+    API_HASH=0123456789abcdef0123456789abcdef \
+    BOT_TOKEN=1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
+    python tools/smoke_import.py \
+    && rm -f /app/log.txt
+
 # The bot appends to log.txt next to the code → keep /app writable for `myra`.
 RUN mkdir -p /app/sessions && chown -R myra:myra /app
 
