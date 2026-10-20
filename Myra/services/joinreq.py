@@ -21,6 +21,7 @@ Everything is scope-aware: a clone bot only controls its own groups.
 import html as _html
 import re
 import time
+from types import SimpleNamespace
 
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.errors import (
@@ -31,8 +32,11 @@ from pyrogram.errors import (
     RPCError,
     UserNotParticipant,
 )
+from pyrogram.raw import functions as raw_functions
+from pyrogram.raw import types as raw_types
 from pyrogram.types import (
     CallbackQuery,
+    Chat as PyroChat,
     ChatJoinRequest,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -306,6 +310,109 @@ async def _notify_admins(client, chat_id: int, user, verified_only: bool = False
 # ══════════════════════════════════════════════════════════════════════════
 _REF_ID = re.compile(r"^-?\d{5,}$")
 _REF_USERNAME = re.compile(r"(?:https?://)?t\.me/([A-Za-z0-9_]{3,})|^@([A-Za-z0-9_]{3,})$")
+# A private group's "Copy Link" looks like t.me/c/<internal>/<msg>: the id is
+# right there, so this one always works.
+_REF_PRIVATE = re.compile(
+    r"(?:https?://)?(?:www\.)?t\.me/c/(\d{5,})(?:/\d+)?", re.IGNORECASE
+)
+# Private invite links: t.me/+hash, t.me/joinchat/hash (and the tg:// variant).
+_REF_INVITE = re.compile(
+    r"(?:https?://)?(?:www\.)?t\.me/(?:\+|joinchat/)([A-Za-z0-9_-]{6,})"
+    r"|tg://join\?invite=([A-Za-z0-9_-]{6,})",
+    re.IGNORECASE,
+)
+
+
+async def _as_group(chat):
+    """Reject anything that is not a group/channel."""
+    if chat is None:
+        return None, "chat nahi mila ❌"
+    if chat.type == ChatType.PRIVATE:
+        return None, "ye toh koi user hai 😅 group/channel do"
+    return chat, None
+
+
+def _chat_from_raw(client, raw_chat):
+    """Raw TL chat (inside ``ChatInviteAlready``) -> panel-friendly chat."""
+    try:
+        parsed = PyroChat._parse_chat(client, raw_chat)
+        if parsed is not None:
+            return parsed
+    except Exception:  # noqa: BLE001 - optional TL fields can be None
+        pass
+
+    raw_id = int(getattr(raw_chat, "id", 0) or 0)
+    if isinstance(raw_chat, raw_types.Channel):
+        raw_id = int(f"-100{abs(raw_id)}")
+        chat_type = ChatType.SUPERGROUP
+    else:
+        chat_type = ChatType.GROUP
+    return SimpleNamespace(
+        id=raw_id,
+        title=getattr(raw_chat, "title", "") or "",
+        username=getattr(raw_chat, "username", None),
+        type=chat_type,
+    )
+
+
+async def _invite_via_userbots(invite_hash: str):
+    """
+    Ask the connected userbots what this invite link points to.
+
+    A **bot** account is not allowed to call ``messages.CheckChatInvite`` (nor
+    ``ImportChatInvite``): Telegram answers ``BOT_METHOD_INVALID``. A normal
+    user account can, and when that account is already a member the reply
+    carries the full chat - so a userbot that sits in the group resolves the
+    link for us.
+    """
+    try:
+        from Myra.userbot.storage import accounts as ub_accounts
+    except Exception:  # noqa: BLE001
+        return None
+
+    for account_id, data in list(ub_accounts.items()):
+        client = data.get("client")
+        if client is None or (data.get("status") or "") != "CONNECTED":
+            continue
+        try:
+            invite = await client.invoke(
+                raw_functions.messages.CheckChatInvite(hash=invite_hash)
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug(f"joinreq: {account_id} could not check invite: {exc}")
+            continue
+        raw_chat = getattr(invite, "chat", None)
+        if raw_chat is None:
+            continue  # not a member of that group
+        chat = _chat_from_raw(client, raw_chat)
+        if getattr(chat, "id", 0):
+            LOGGER.info(f"joinreq: invite link resolved through userbot {account_id}")
+            return chat
+    return None
+
+
+async def resolve_invite(client, invite_hash: str):
+    """
+    Resolve a private ``t.me/+hash`` invite link into a chat.
+
+    The bot itself can never do this (Telegram forbids invite-hash methods for
+    bots), so we try the connected userbots first. When none of them is in the
+    group we return instructions that do work: ``/id`` inside the group, a
+    forwarded message, or the ``t.me/c/...`` copy-link.
+    """
+    chat = await _invite_via_userbots(invite_hash)
+    if chat is not None:
+        return await _as_group(chat)
+
+    return None, (
+        "Ye private invite link hai 🔗\n\n"
+        "Telegram bots ko invite link padhne ki permission nahi deta, isliye "
+        "main is link se group id nahi nikal sakta 😅\n\n"
+        "Koi ek tarika chuno:\n"
+        "1️⃣ Group ke andar /id bhejo → jo -100… id aaye wo yahan paste karo\n"
+        "2️⃣ Group ke kisi message ko yahan forward karo\n"
+        "3️⃣ Message pe Copy Link → t.me/c/… link yahan bhejo"
+    )
 
 
 async def resolve_chat(client, text: str):
@@ -320,15 +427,27 @@ async def resolve_chat(client, text: str):
         return None, "bahut lamba text aa gaya 😅"
 
     target = None
+    invite_hash = None
     if _REF_ID.match(text):
         target = int(text)
     else:
-        m = _REF_USERNAME.search(text)
-        if not m:
-            return None, "id, @username ya t.me link chahiye 🙂"
-        target = m.group(1) or m.group(2)
-        if target.lower() in ("joinchat", "addstickers", "share", "proxy", "socks"):
-            return None, "koi channel/group ka @username ya link do 🙂"
+        m = _REF_PRIVATE.search(text)
+        if m:
+            target = int(f"-100{m.group(1)}")
+        else:
+            m = _REF_INVITE.search(text)
+            if m:
+                invite_hash = m.group(1) or m.group(2)
+            else:
+                m = _REF_USERNAME.search(text)
+                if not m:
+                    return None, "id, @username ya t.me link chahiye 🙂"
+                target = m.group(1) or m.group(2)
+                if target.lower() in ("joinchat", "addstickers", "share", "proxy", "socks"):
+                    return None, "koi channel/group ka @username ya link do 🙂"
+
+    if invite_hash:
+        return await resolve_invite(client, invite_hash)
 
     try:
         chat = await client.get_chat(target)
@@ -356,6 +475,7 @@ __all__ = [
     "on_join_request",
     "verify_and_approve",
     "resolve_chat",
+    "resolve_invite",
     "invite_for",
     "build_verify_keyboard",
 ]

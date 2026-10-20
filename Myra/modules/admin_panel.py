@@ -863,7 +863,10 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
                 "1️⃣ Group mein bot ko **admin** banao "
                 "(Invite users + Manage chat)\n"
                 "2️⃣ Group settings → **Members → Join requests** ON karo\n\n"
-                "Ab group ka `@username`, `t.me/...` link ya `-100…` id bhejo.\n"
+                "Ab group ka `@username` ya `-100…` id bhejo.\n"
+                "Private group ke liye: group ke andar `/id` bhejo, ya group ke "
+                "kisi message ko yahan **forward** kar do, ya uske "
+                "*Copy Link* (`t.me/c/…`) bhejo.\n\n"
                 "`/cancel` se cancel kar sakte ho.",
                 reply_markup=InlineKeyboardMarkup([[_back("ad_jr")]]),
             )
@@ -904,7 +907,8 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
             await query.message.edit_text(
                 "➕ **Required channel/group bhejo**\n\n"
                 "VERIFY se pehle user ko ye join karna hoga.\n"
-                "`@username`, `t.me/...` link ya `-100…` id bhejo.\n"
+                "`@username`, `-100…` id ya `t.me/c/…` link bhejo — ya kisi "
+                "message ko yahan **forward** karo.\n"
                 "`/cancel` se cancel kar sakte ho.",
                 reply_markup=InlineKeyboardMarkup([[_back(f"ad_jr_set:{chat_id}")]]),
             )
@@ -1252,6 +1256,20 @@ async def _start_broadcast(user_id: int, flow: dict, source: Message):
         pass
 
 
+async def _pending_chat(message: Message, text: str):
+    """
+    Resolve the group the admin pasted / forwarded.
+
+    A **forwarded** message from the group is the friendliest input (Telegram
+    hands us ``forward_from_chat``), and it is the only one that works for a
+    private group whose invite link a bot is not allowed to read.
+    """
+    forwarded = getattr(message, "forward_from_chat", None)
+    if forwarded is not None and getattr(forwarded, "type", None) != ChatType.PRIVATE:
+        return forwarded, None
+    return await joinreq_service.resolve_chat(message._client, text)
+
+
 async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bool:
     """Handle a pending text input. Returns True when the message was consumed."""
     kind = flow.get("kind")
@@ -1312,7 +1330,7 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
 
     # ── group request controller ───────────────────────────────────────────
     if kind == "jr_add":
-        chat, err = await joinreq_service.resolve_chat(message._client, text)
+        chat, err = await _pending_chat(message, text)
         if chat is None:
             await message.reply_text(f"❌ {err}\n\n`/cancel` se cancel kar sakte ho.")
             return True
@@ -1362,7 +1380,7 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
             pending_input.pop(user_id, None)
             await message.reply_text("❌ Wo group ab managed list mein nahi hai.")
             return True
-        chat, err = await joinreq_service.resolve_chat(message._client, text)
+        chat, err = await _pending_chat(message, text)
         if chat is None:
             await message.reply_text(f"❌ {err}\n\n`/cancel` se cancel kar sakte ho.")
             return True
