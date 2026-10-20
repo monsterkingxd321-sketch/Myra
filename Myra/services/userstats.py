@@ -4,16 +4,24 @@ Audience statistics — how many groups and DM chats the bot and each userbot ha
 Used by the ``/admin`` panel (📊 Stats) and available to any other module.
 
 The numbers come from the same caches the broadcast engine uses, so opening the
-panel is cheap: the main bot's lists are read from MongoDB and a userbot's lists
-from its dialog cache (refreshed at most every 30 minutes, or on demand with
-``force=True``).
+panel is cheap: the main bot's lists are read from MongoDB (one parallel pair of
+queries) and a userbot's lists come from its dialog cache. A report is cached
+for ``_COLLECT_TTL`` seconds and, unless ``force=True``, an expired dialog list
+is served as-is instead of being re-read — the panel must never wait on
+``get_dialogs()``. ``force=True`` re-reads everything (the "re-scan" button).
 """
 
+import asyncio
 import time
 
 from Myra import LOGGER
 from Myra.database.scope import current_scope, owns_scope
 from Myra.services.broadcast import bot_targets, userbot_dialogs
+
+# The panel rebuilds on every button press; a few seconds of cache keeps quick
+# back-and-forth navigation from re-reading the same lists each time.
+_COLLECT_CACHE: dict = {}
+_COLLECT_TTL = 20.0
 
 
 async def collect(force: bool = False, scope: str = None) -> dict:
@@ -23,6 +31,11 @@ async def collect(force: bool = False, scope: str = None) -> dict:
     ``force=True`` re-reads every connected userbot's dialog list (slow).
     """
     scope = scope or current_scope()
+    now = time.time()
+    cached = _COLLECT_CACHE.get(scope)
+    if not force and cached and now - cached.get("time", 0) < _COLLECT_TTL:
+        return cached
+
     report = {
         "time": time.time(),
         "scope": scope,
@@ -42,8 +55,12 @@ async def collect(force: bool = False, scope: str = None) -> dict:
 
     bot_group_ids, bot_dm_ids = set(), set()
     try:
-        bot_group_ids = set(await bot_targets("groups", scope))
-        bot_dm_ids = set(await bot_targets("dm", scope))
+        group_list, dm_list = await asyncio.gather(
+            bot_targets("groups", scope),
+            bot_targets("dm", scope),
+        )
+        bot_group_ids = set(group_list)
+        bot_dm_ids = set(dm_list)
     except Exception as exc:  # noqa: BLE001
         LOGGER.debug(f"userstats: bot targets failed: {exc}")
 
@@ -55,9 +72,7 @@ async def collect(force: bool = False, scope: str = None) -> dict:
     all_groups = set(bot_group_ids)
     all_dm = set(bot_dm_ids)
 
-    for account_id, data in list(ub_accounts.items()):
-        if not owns_scope(data.get("scope"), scope):
-            continue
+    async def _account_entry(account_id: str, data: dict):
         entry = {
             "name": data.get("name") or account_id,
             "username": data.get("username") or "",
@@ -66,18 +81,40 @@ async def collect(force: bool = False, scope: str = None) -> dict:
             "dm": 0,
             "error": "",
         }
+        groups, dm = [], []
         client = data.get("client")
         if client is not None and entry["status"] == "CONNECTED":
             try:
-                dialogs = await userbot_dialogs(client, account_id, force=force)
-                entry["groups"] = len(dialogs.get("groups", []))
-                entry["dm"] = len(dialogs.get("dm", []))
-                all_groups |= set(dialogs.get("groups", []))
-                all_dm |= set(dialogs.get("dm", []))
+                dialogs = await userbot_dialogs(
+                    client,
+                    account_id,
+                    force=force,
+                    allow_stale=not force,
+                )
+                groups = dialogs.get("groups", [])
+                dm = dialogs.get("dm", [])
+                entry["groups"] = len(groups)
+                entry["dm"] = len(dm)
             except Exception as exc:  # noqa: BLE001
                 entry["error"] = f"{type(exc).__name__}"
                 LOGGER.debug(f"userstats: dialogs for {account_id} failed: {exc}")
+        return account_id, entry, groups, dm
+
+    targets = [
+        (account_id, data)
+        for account_id, data in list(ub_accounts.items())
+        if owns_scope(data.get("scope"), scope)
+    ]
+
+    # One gather: six accounts walking their dialog list one after another is
+    # what made the first /admin open take seconds.
+    results = await asyncio.gather(
+        *(_account_entry(account_id, data) for account_id, data in targets)
+    )
+    for account_id, entry, groups, dm in results:
         report["userbots"][account_id] = entry
+        all_groups |= set(groups)
+        all_dm |= set(dm)
 
     report["totals"] = {
         "bot_groups": report["bot"]["groups"],
@@ -91,6 +128,7 @@ async def collect(force: bool = False, scope: str = None) -> dict:
             1 for e in report["userbots"].values() if e["status"] == "CONNECTED"
         ),
     }
+    _COLLECT_CACHE[scope] = report
     return report
 
 

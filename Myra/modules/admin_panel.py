@@ -23,6 +23,7 @@ talked to: a cloned bot's panel only ever shows that clone's own admins,
 userbots, groups, DMs and settings.
 """
 
+import asyncio
 import time
 from uuid import uuid4
 
@@ -56,6 +57,21 @@ from Myra.services.autochat import autochat_service
 pending_input: dict = {}
 # token -> {"stop": bool}
 active_broadcasts: dict = {}
+
+
+async def _safe(coro, default=None):
+    """
+    Await *coro*, returning *default* if it fails.
+
+    The panels gather a dozen independent database reads at once; one broken
+    collection must not blank the whole panel, and ``asyncio.gather`` would
+    otherwise re-raise the first exception.
+    """
+    try:
+        return await coro
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.debug(f"admin panel query failed: {exc}")
+        return default
 
 SPEED_PRESETS = ((0, "⚡ 0s"), (5000, "⏱ 5s"), (10000, "🐢 10s"), (30000, "🕐 30s"))
 INTERVAL_PRESETS = (60, 300, 900, 1800, 3600, 10800, 21600)
@@ -94,23 +110,43 @@ def _back(target="ad_main"):
 #  Panels
 # ══════════════════════════════════════════════════════════════════════════
 async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
-    from Myra.services import userstats
-
-    bot_auto = await ac.get_bot_enabled()
-    ub_auto = await ac.get_ub_enabled()
-    db = await training.get_stats()
-
     from Myra.ai.brain import ai_status
+    from Myra.services import userstats
+    from Myra.services.clones import clone_manager
+
+    # One gather instead of ~12 sequential round trips. Every value below is
+    # independent and each Atlas hop costs 50-150 ms, which is what made the
+    # panel take 1.5-2.5 s before rendering its first character.
+    (
+        bot_auto,
+        ub_auto,
+        db,
+        chats_list,
+        users_list,
+        audience,
+        clones_list,
+        bot_interval,
+        bot_targets,
+        ub_interval,
+        ub_targets,
+    ) = await asyncio.gather(
+        _safe(ac.get_bot_enabled(), False),
+        _safe(ac.get_ub_enabled(), False),
+        _safe(training.get_stats(), {}),
+        _safe(get_served_chats(), []),
+        _safe(get_served_users(), []),
+        _safe(userstats.collect(), {}),
+        _safe(clone_manager.list_clones(), []),
+        _safe(ac.get_bot_interval(), 0),
+        _safe(ac.get_bot_targets(), "both"),
+        _safe(ac.get_ub_interval(), 0),
+        _safe(ac.get_ub_targets(), "both"),
+    )
 
     ai = ai_status()
-    try:
-        chats = len(await get_served_chats())
-        users = len(await get_served_users())
-    except Exception:  # noqa: BLE001
-        chats = users = 0
-
-    audience = await userstats.collect()
-    totals = audience.get("totals", {})
+    chats = len(chats_list)
+    users = len(users_list)
+    totals = (audience or {}).get("totals", {})
     my_accounts = _my_accounts()
 
     text = (
@@ -122,11 +158,11 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
         f"✉️ **DM users — bot:** `{users}` · **userbots:** `{totals.get('userbot_dm', 0)}`\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"⏰ **AutoChat — bot:** {'🟢 ON' if bot_auto else '🔴 OFF'}"
-        f" · `{ac.human_interval(await ac.get_bot_interval())}`"
-        f" · {ac.label_for_target(await ac.get_bot_targets())}\n"
+        f" · `{ac.human_interval(bot_interval)}`"
+        f" · {ac.label_for_target(bot_targets)}\n"
         f"⏰ **AutoChat — userbots:** {'🟢 ON' if ub_auto else '🔴 OFF'}"
-        f" · `{ac.human_interval(await ac.get_ub_interval())}`"
-        f" · {ac.label_for_target(await ac.get_ub_targets())}\n"
+        f" · `{ac.human_interval(ub_interval)}`"
+        f" · {ac.label_for_target(ub_targets)}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📚 **Trained replies:** `{db.get('total', 0)}`\n"
         f"🔑 **API keys:** `{ai.get('active', 0)}/{ai.get('total', 0)}`\n"
@@ -152,9 +188,7 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton("🎛 Reply Behaviour", callback_data="ad_behaviour"),
         ],
     ]
-    from Myra.services.clones import clone_manager
-
-    clones = len(await clone_manager.list_clones())
+    clones = len(clones_list)
     rows.append([
         InlineKeyboardButton(f"🧬 Clones ({clones})", callback_data="ad_clones"),
         InlineKeyboardButton("🧹 Clean DB", callback_data="ad_clean"),
@@ -244,8 +278,14 @@ def _broadcast_prompt(sender: str, target: str) -> tuple[str, InlineKeyboardMark
 
 
 async def _autochat_panel() -> tuple[str, InlineKeyboardMarkup]:
-    bot_on = await ac.get_bot_enabled()
-    ub_on = await ac.get_ub_enabled()
+    bot_on, ub_on, bot_interval, bot_targets, ub_interval, ub_targets = await asyncio.gather(
+        _safe(ac.get_bot_enabled(), False),
+        _safe(ac.get_ub_enabled(), False),
+        _safe(ac.get_bot_interval(), 0),
+        _safe(ac.get_bot_targets(), "both"),
+        _safe(ac.get_ub_interval(), 0),
+        _safe(ac.get_ub_targets(), "both"),
+    )
     status = autochat_service.status()
 
     text = (
@@ -254,11 +294,11 @@ async def _autochat_panel() -> tuple[str, InlineKeyboardMarkup]:
         "Bot aur userbots apne-apne timing par khud messages bhejte rahenge "
         "(groups / DMs), ekdum insaan jaise.\n\n"
         f"🤖 **Main Bot:** {'🟢 ON' if bot_on else '🔴 OFF'}\n"
-        f"   ↳ har `{ac.human_interval(await ac.get_bot_interval())}`"
-        f" · {ac.label_for_target(await ac.get_bot_targets())}\n"
+        f"   ↳ har `{ac.human_interval(bot_interval)}`"
+        f" · {ac.label_for_target(bot_targets)}\n"
         f"👥 **All Userbots:** {'🟢 ON' if ub_on else '🔴 OFF'}\n"
-        f"   ↳ har `{ac.human_interval(await ac.get_ub_interval())}`"
-        f" · {ac.label_for_target(await ac.get_ub_targets())}\n"
+        f"   ↳ har `{ac.human_interval(ub_interval)}`"
+        f" · {ac.label_for_target(ub_targets)}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📨 **Messages sent:** `{status.get('sent_total', 0)}`"
         f" · ❌ failed `{status.get('failed_total', 0)}`\n"
@@ -292,15 +332,19 @@ async def _autochat_panel() -> tuple[str, InlineKeyboardMarkup]:
 
 async def _autochat_side_panel(scope: str) -> tuple[str, InlineKeyboardMarkup]:
     if scope == "bot":
-        enabled = await ac.get_bot_enabled()
-        interval = await ac.get_bot_interval()
-        targets = await ac.get_bot_targets()
+        enabled, interval, targets = await asyncio.gather(
+            _safe(ac.get_bot_enabled(), False),
+            _safe(ac.get_bot_interval(), 0),
+            _safe(ac.get_bot_targets(), "both"),
+        )
         title = f"🤖 AUTOCHAT — {bot_info().get('name') or 'MAIN BOT'}"
         note = "Bot sirf unhi groups/DMs me bhejega jaha wo already hai."
     else:
-        enabled = await ac.get_ub_enabled()
-        interval = await ac.get_ub_interval()
-        targets = await ac.get_ub_targets()
+        enabled, interval, targets = await asyncio.gather(
+            _safe(ac.get_ub_enabled(), False),
+            _safe(ac.get_ub_interval(), 0),
+            _safe(ac.get_ub_targets(), "both"),
+        )
         title = "👥 AUTOCHAT — ALL USERBOTS"
         note = "Ye global setting hai — saare userbots par lagegi (jo connected hain)."
 
@@ -361,10 +405,12 @@ def _jr_count(chats: list, key: str) -> int:
 
 
 async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
-    enabled = await ai_settings.get_setting(ai_settings.KEY_JOINREQ_ENABLED, default=False)
-    auto = await ai_settings.get_setting(ai_settings.KEY_JOINREQ_AUTO, default=True)
-    welcome = await ai_settings.get_setting(ai_settings.KEY_JOINREQ_WELCOME, default=None)
-    chats = await jdb.list_managed()
+    enabled, auto, welcome, chats = await asyncio.gather(
+        _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_ENABLED, default=False), False),
+        _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_AUTO, default=True), True),
+        _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_WELCOME, default=None), None),
+        _safe(jdb.list_managed(), []),
+    )
 
     req_total = 0
     for chat in chats:
@@ -531,9 +577,11 @@ async def _ai_panel() -> tuple[str, InlineKeyboardMarkup]:
 
 
 async def _behaviour_panel() -> tuple[str, InlineKeyboardMarkup]:
-    delay = await ai_settings.get_reply_delay()
-    group_chance = await ai_settings.get_group_chance()
-    dm_chance = await ai_settings.get_private_chance()
+    delay, group_chance, dm_chance = await asyncio.gather(
+        _safe(ai_settings.get_reply_delay(), 0),
+        _safe(ai_settings.get_group_chance(), 100),
+        _safe(ai_settings.get_private_chance(), 100),
+    )
 
     text = (
         "🎛 **REPLY BEHAVIOUR (all userbots)**\n"
@@ -566,15 +614,16 @@ async def _behaviour_panel() -> tuple[str, InlineKeyboardMarkup]:
 async def _stats_panel() -> tuple[str, InlineKeyboardMarkup]:
     from Myra.services import userstats
 
-    db = await training.get_stats()
-    try:
-        chats = len(await get_served_chats())
-        users = len(await get_served_users())
-    except Exception:  # noqa: BLE001
-        chats = users = 0
+    db, chats_list, users_list, audience = await asyncio.gather(
+        _safe(training.get_stats(), {}),
+        _safe(get_served_chats(), []),
+        _safe(get_served_users(), []),
+        _safe(userstats.collect(), {}),
+    )
     status = autochat_service.status()
-    audience = await userstats.collect()
-    totals = audience.get("totals", {})
+    chats = len(chats_list)
+    users = len(users_list)
+    totals = (audience or {}).get("totals", {})
 
     text = (
         "📊 **BOT STATISTICS**\n"
@@ -719,13 +768,15 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
 
     async def show(text_markup, alert: str = None):
         text, markup = text_markup
+        # Answer before editing: this is what stops the button spinner, so the
+        # tap feels instant instead of waiting for the whole edit round trip.
+        await query.answer(alert or "", show_alert=bool(alert))
         try:
             await query.message.edit_text(
                 text, reply_markup=markup, disable_web_page_preview=True
             )
         except Exception:  # noqa: BLE001 - "message is not modified" etc.
             pass
-        await query.answer(alert or "", show_alert=bool(alert))
 
     # ── main ───────────────────────────────────────────────────────────────
     if data == "ad_main":

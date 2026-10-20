@@ -407,7 +407,7 @@ async def clean_database() -> dict:
 
 _STATS_CACHE = {"ts": 0.0, "data": None}
 STATS_TTL = 300          # seconds — keeps /admin and /stats instant
-_STATS_SCAN = 50_000     # documents examined to estimate sticker ratios
+_STATS_SCAN = 2_000      # documents examined to estimate sticker ratios
 
 
 def invalidate_stats() -> None:
@@ -423,7 +423,7 @@ async def get_stats(use_cache: bool = True) -> dict:
     Exact ``count_documents()`` on a multi-million document collection takes
     many seconds (and the ``check``/``source`` fields are not indexed), so the
     totals come from the collection metadata and the sticker ratio from a
-    bounded scan of the first 50 000 documents. The result is cached for
+    bounded scan of the first 2 000 documents. The result is cached for
     ``STATS_TTL`` seconds.
     """
     now = time.time()

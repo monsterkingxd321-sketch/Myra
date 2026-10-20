@@ -14,6 +14,19 @@ adminsdb = bot_mongo["UserbotDB"]["bot_admins"] if bot_mongo is not None else No
 # apply. See Myra/database/scope.py.
 ADMIN_SCOPE = MAIN_SCOPE
 
+# ``is_admin`` runs on every panel button press. The owner never reaches the
+# database, but added admins used to pay a full round trip per tap, so the
+# non-owner answer is cached briefly and invalidated by add/remove.
+_ADMIN_CACHE: dict = {}
+_ADMIN_TTL = 60.0
+
+
+def _forget_admin(user_id) -> None:
+    try:
+        _ADMIN_CACHE.pop(int(user_id), None)
+    except Exception:  # noqa: BLE001
+        pass
+
 
 def is_owner(user_id: int, scope: str = None) -> bool:
     """
@@ -43,10 +56,22 @@ async def is_admin(user_id: int, scope: str = None) -> bool:
     if adminsdb is None:
         return False
     try:
+        uid = int(user_id)
+    except Exception:  # noqa: BLE001
+        return False
+
+    now = time.time()
+    cached = _ADMIN_CACHE.get(uid)
+    if cached and now - cached[0] < _ADMIN_TTL:
+        return cached[1]
+
+    try:
         doc = await adminsdb.find_one(
-            {"user_id": int(user_id), **scope_match(ADMIN_SCOPE)}
+            {"user_id": uid, **scope_match(ADMIN_SCOPE)}
         )
-        return doc is not None
+        value = doc is not None
+        _ADMIN_CACHE[uid] = (now, value)
+        return value
     except Exception as e:  # noqa: BLE001
         print(f"⚠️ Error checking admin status for {user_id}: {e}")
         return False
@@ -79,6 +104,7 @@ async def add_admin(
             await adminsdb.insert_one(
                 {**fields, **scope_field(ADMIN_SCOPE), "added_at": time.time()}
             )
+        _forget_admin(user_id)
         return True
     except Exception as e:  # noqa: BLE001
         print(f"⚠️ Error adding admin {user_id}: {e}")
@@ -93,6 +119,7 @@ async def remove_admin(user_id: int, scope: str = None) -> bool:
         result = await adminsdb.delete_one(
             {"user_id": int(user_id), **scope_match(ADMIN_SCOPE)}
         )
+        _forget_admin(user_id)
         return result.deleted_count > 0
     except Exception as e:  # noqa: BLE001
         print(f"⚠️ Error removing admin {user_id}: {e}")

@@ -30,6 +30,35 @@ from Myra.database.users import get_users
 DIALOG_CACHE_TTL = 30 * 60  # 30 minutes
 _DIALOG_CACHE: dict = {}
 
+# Expired lists are refreshed in the background so a caller using
+# ``allow_stale=True`` (the admin panel) never waits on Telegram.
+_REFRESH_TASKS: set = set()
+_REFRESHING: set = set()
+
+
+def _schedule_dialog_refresh(client: Client, account_id: str) -> None:
+    """Re-read one expired dialog list without blocking the current caller."""
+    if account_id in _REFRESHING:
+        return
+    _REFRESHING.add(account_id)
+
+    def _done(task) -> None:
+        _REFRESH_TASKS.discard(task)
+        _REFRESHING.discard(account_id)
+        try:
+            task.exception()
+        except Exception:  # noqa: BLE001 - cancelled/failed refreshes are noise
+            pass
+
+    try:
+        task = asyncio.ensure_future(userbot_dialogs(client, account_id, force=True))
+    except Exception as exc:  # noqa: BLE001
+        _REFRESHING.discard(account_id)
+        LOGGER.debug(f"broadcast: could not refresh dialogs for {account_id}: {exc}")
+        return
+    _REFRESH_TASKS.add(task)
+    task.add_done_callback(_done)
+
 # Human-ish pause between two sends from a *user account* (Telegram bans fast
 # mass-messaging), the bot can go a bit faster.
 USERBOT_SLEEP = 1.4
@@ -119,12 +148,28 @@ async def bot_targets(kind: str, scope: str = None) -> list:
     return []
 
 
-async def userbot_dialogs(client: Client, account_id: str, force: bool = False) -> dict:
-    """Cached {"groups": [...], "dm": [...]} for one userbot account."""
+async def userbot_dialogs(
+    client: Client,
+    account_id: str,
+    force: bool = False,
+    allow_stale: bool = False,
+) -> dict:
+    """
+    Cached {"groups": [...], "dm": [...]} for one userbot account.
+
+    ``allow_stale=True`` returns the last known list even when it is older than
+    ``DIALOG_CACHE_TTL`` instead of asking Telegram again. The read-only admin
+    views use that so opening the panel never waits on ``get_dialogs()`` for
+    every connected account; the "re-scan" button is what refreshes them.
+    """
     now = time.time()
     cached = _DIALOG_CACHE.get(account_id)
-    if cached and not force and now - cached.get("ts", 0) < DIALOG_CACHE_TTL:
-        return cached
+    if cached and not force:
+        if now - cached.get("ts", 0) < DIALOG_CACHE_TTL:
+            return cached
+        if allow_stale:
+            _schedule_dialog_refresh(client, account_id)
+            return cached
 
     groups, dm = [], []
     skip_ids = await own_account_ids()

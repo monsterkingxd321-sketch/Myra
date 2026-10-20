@@ -129,7 +129,29 @@ async def start_bot():
     except Exception as ex:
         LOGGER.warning(f"⚠️ Could not start AutoChat service: {ex}")
 
+    # Warm the admin views in the background: the training stats and the
+    # audience report (which walks every userbot's dialog list once). Without
+    # this, the first /admin open after a restart paid for all of it.
+    async def _warm_admin_caches():
+        await asyncio.sleep(10)  # let startup traffic settle first
+        try:
+            from Myra.database import training
+            from Myra.services import userstats
+
+            await training.get_stats()
+            await userstats.collect(force=True)
+            LOGGER.info("⚡ Admin caches warmed")
+        except Exception as ex:  # noqa: BLE001
+            LOGGER.debug(f"admin cache warm-up skipped: {ex}")
+
+    warm_task = asyncio.create_task(_warm_admin_caches())
+
     await idle()
+
+    try:
+        warm_task.cancel()
+    except Exception:  # noqa: BLE001
+        pass
 
     # Graceful stop on shutdown
     try:
