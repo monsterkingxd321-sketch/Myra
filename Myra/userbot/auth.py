@@ -76,6 +76,41 @@ def explain_login_error(exc) -> str:
         )
     if "flood_wait" in low:
         return f"Telegram ne wait karne ko kaha hai:\n`{raw[:160]}`"
+    # ── session-file specific failures ─────────────────────────────────────
+    if "auth_key_unregistered" in low or "session_revoked" in low or "session_expired" in low:
+        return (
+            "Session expired / logout ho chuka hai. Naya session banao "
+            "(uska `.session` file ya session string bhejo).\n"
+            f"`{raw[:160]}`"
+        )
+    if "auth_key_duplicated" in low:
+        return (
+            "Ye account kisi doosre client me already chal raha hai (same session). "
+            "Us jagah se logout karo, ya naye session se dobara try karo.\n"
+            f"`{raw[:160]}`"
+        )
+    if "auth_key_invalid" in low or "api_id_published_flood" in low:
+        return (
+            "Session ki auth key Telegram ne reject kar di. Naya session banao.\n"
+            f"`{raw[:160]}`"
+        )
+    if "user_deactivated" in low:
+        return (
+            "Ye Telegram account deactivate/delete ho chuka hai — dobara login nahi "
+            "hoga.\n"
+            f"`{raw[:160]}`"
+        )
+    if (
+        "timed out" in low
+        or "timeout" in low
+        or "after 10 retries" in low
+        or "failed to invoke" in low
+    ):
+        return (
+            "Telegram se connection nahi ban paya (session dead hai ya galat DC ka). "
+            "Naya session banao.\n"
+            f"`{raw[:160]}`"
+        )
     return f"Telegram error:\n`{raw[:200]}`"
 
 

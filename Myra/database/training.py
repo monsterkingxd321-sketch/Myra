@@ -156,6 +156,14 @@ async def _candidates(trigger: str, limit: int) -> list[dict]:
     variants = list(dict.fromkeys([trigger.strip(), trigger.strip().lower(), normalized]))
     await _pull({"word": {"$in": variants}}, 20)
 
+    # Exact hit = best possible score (search_reply forces 1.0), so the token
+    # and prefix queries below cannot change the outcome — skip them and save a
+    # round trip (~35-70 ms) on the most common path.
+    exact_set = {value.strip().lower() for value in variants}
+    for doc in pool.values():
+        if (doc.get("word") or "").strip().lower() in exact_set:
+            return [doc]
+
     # 2. token overlap (only when the multi-key index exists — otherwise this
     #    would be a full collection scan on huge datasets)
     if tokens and await has_tokens_index():
@@ -164,7 +172,12 @@ async def _candidates(trigger: str, limit: int) -> list[dict]:
     # 3. index-friendly prefix match on the leading token (indexed)
     if tokens:
         first = re.escape(tokens[0])
-        await _pull({"word": {"$regex": f"^{first}", "$options": "i"}}, 25)
+        # NO "$options": "i" here. MongoDB cannot use an index for a
+        # case-insensitive prefix regex, so it examined ~516k index keys
+        # (~512 ms on the free Atlas tier) on *every* message. `word` is
+        # stored already normalized/lower-case (and tokenize() lower-cases
+        # the token), so a case-sensitive prefix is both correct and 0 ms.
+        await _pull({"word": {"$regex": f"^{first}"}}, 25)
 
     # 4. optional MongoDB full-text index as an extra fallback
     if not pool and normalized and getattr(config, "AI_CREATE_TEXT_INDEX", False):

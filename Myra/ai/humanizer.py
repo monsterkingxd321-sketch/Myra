@@ -15,11 +15,63 @@ type at a constant speed. This module adds that imperfection:
 import asyncio
 import random
 import re
+import time
 
 from pyrogram.enums import ChatAction
+from pyrogram.errors import FloodWait, SlowmodeWait
 
 DEFAULT_CHANCE = 85.0
 DEFAULT_WPM = 220.0
+
+# Chats where Telegram told us to wait (group slowmode / flood). Keyed by chat id,
+# value is a ``time.monotonic()`` deadline. A chat in cooldown is skipped without
+# typing or a seen-mark, which is what stops the retry storm: with slowmode on,
+# every incoming message used to trigger another failed send, another ERROR line
+# and another 420 — dozens per second, on Railway that also means log I/O.
+_CHAT_COOLDOWN: dict = {}
+_COOLDOWN_MAX = 15 * 60          # never trust a longer "wait" than 15 min
+
+
+def _cooldown_left(chat_id) -> float:
+    """Seconds left on a chat's slowmode cooldown (0 when free)."""
+    left = _CHAT_COOLDOWN.get(chat_id, 0.0) - time.monotonic()
+    if left <= 0:
+        _CHAT_COOLDOWN.pop(chat_id, None)
+        return 0.0
+    return left
+
+
+def _cool_down(chat_id, seconds) -> float:
+    try:
+        seconds = float(seconds or 0)
+    except Exception:  # noqa: BLE001
+        seconds = 60.0
+    seconds = max(1.0, min(seconds, _COOLDOWN_MAX))
+    _CHAT_COOLDOWN[chat_id] = time.monotonic() + seconds + 3.0
+    return seconds
+
+
+_WAIT_RE = re.compile(r"(\d+)\s*(?:seconds?|secs?)", re.IGNORECASE)
+
+
+def _wait_seconds(exc, default: float = 60.0) -> float:
+    """
+    How long Telegram asked us to wait.
+
+    ``FloodWait.value`` is normally an int, but the raw RPC error value can be a
+    string, and a slowmode error reads "wait 172 seconds" — so fall back to the
+    number inside the message instead of always assuming 60 s.
+    """
+    value = getattr(exc, "value", None)
+    if isinstance(value, (int, float)):
+        return max(1.0, float(value))
+    match = _WAIT_RE.search(str(exc))
+    if match:
+        return max(1.0, float(match.group(1)))
+    try:
+        return max(1.0, float(value))
+    except Exception:  # noqa: BLE001
+        return default
 
 
 def clamp(value: float, low: float, high: float) -> float:
@@ -216,10 +268,17 @@ async def respond_like_human(
     if not should_reply(chance):
         return False
 
+    chat_id = message.chat.id
+    if _cooldown_left(chat_id):
+        # Telegram already asked us to wait here. Staying silent is the fix —
+        # retrying on every new message produced a 420 + an ERROR line per
+        # message (the slowmode storm in the logs).
+        return False
+
     # A real person opens the chat first — your message turns "seen" — and only
     # then starts typing. Read receipts are user-only, so this silently does
     # nothing when the main bot (or a clone) is the one replying.
-    await mark_seen(client, message.chat.id, logger=logger)
+    await mark_seen(client, chat_id, logger=logger)
 
     try:
         # ── sticker ──────────────────────────────────────────────────────
@@ -253,9 +312,35 @@ async def respond_like_human(
 
     except asyncio.CancelledError:
         raise
-    except Exception as exc:  # noqa: BLE001
+    except SlowmodeWait as exc:
+        # Group slowmode. Telegram tells us exactly how long to wait; mute the
+        # chat for that long instead of retrying on the very next message.
+        wait = _cool_down(chat_id, _wait_seconds(exc))
         if logger is not None:
-            logger.error(f"⚠️ human reply failed: {exc}")
+            logger.debug(f"slowmode in {chat_id}: muted for {int(wait)}s")
+        return False
+    except FloodWait as exc:
+        wait = _cool_down(chat_id, _wait_seconds(exc))
+        if logger is not None:
+            logger.warning(f"flood wait in {chat_id}: muted for {int(wait)}s")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        # Expected Telegram refusals (expired sticker file reference, no write
+        # rights, message already gone…) are not ERROR-worthy and used to flood
+        # the log at one line per message.
+        name = type(exc).__name__.lower()
+        quiet = (
+            "filereference" in name
+            or "chatwriteforbidden" in name
+            or "messagenotmodified" in name
+            or "messageid_invalid" in name
+            or "peeridinvalid" in name
+        )
+        if logger is not None:
+            if quiet:
+                logger.debug(f"human reply skipped in {chat_id}: {type(exc).__name__}")
+            else:
+                logger.warning(f"human reply failed: {exc}")
         return False
 
 
