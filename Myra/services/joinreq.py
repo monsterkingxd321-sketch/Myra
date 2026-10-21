@@ -110,6 +110,8 @@ def _usable_required(required) -> list:
     """
     out = []
     for entry in required or []:
+        if _is_manual(entry):
+            continue  # checked by a human, not by get_chat_member
         try:
             chat_id = int(entry.get("chat_id") or 0)
         except Exception:  # noqa: BLE001
@@ -124,6 +126,72 @@ def _usable_required(required) -> list:
             continue
         out.append(entry)
     return out
+
+
+#: Entry types that a bot can never membership-check. They are shown as join
+#: buttons, but the group admin approves the request by hand.
+MANUAL_TYPES = ("manual", "bot", "link")
+
+
+def _is_manual(entry) -> bool:
+    """A manual entry = a link we can only *show* (bot referral, website…)."""
+    if not isinstance(entry, dict):
+        return False
+    if str(entry.get("type") or "").lower() in MANUAL_TYPES:
+        return True
+    # no chat id and only a URL → nothing to check either
+    try:
+        chat_id = int(entry.get("chat_id") or 0)
+    except Exception:  # noqa: BLE001
+        chat_id = 0
+    return chat_id == 0 and bool(entry.get("invite")) and not entry.get("username")
+
+
+def _manual_required(required) -> list:
+    return [entry for entry in required or [] if _is_manual(entry)]
+
+
+def manual_entry(text: str):
+    """
+    Turn a pasted **bot referral link** or any external URL into a manual
+    required entry. Returns ``None`` when the text is a normal group/channel
+    reference (so the regular resolver handles it).
+    """
+    text = (text or "").strip()
+    if not text or len(text) > 300:
+        return None
+    # private invites + t.me/c copy-links go through the normal resolver
+    if _REF_INVITE.search(text) or _REF_PRIVATE.search(text):
+        return None
+
+    m = _REF_TME.search(text)
+    if m:
+        name = m.group(1)
+        tail = m.group(2) or ""
+        if not re.search(r"[?&](start|startgroup|startapp|ref)=", tail, re.IGNORECASE):
+            return None  # plain group / channel link
+        return {
+            "chat_id": 0,
+            "username": None,
+            "label": f"@{name}",
+            "invite": f"https://t.me/{name}{tail}",
+            "type": "manual",
+        }
+
+    m = _REF_URL.search(text)
+    if not m:
+        return None
+    url = m.group(0)
+    host = url.split("://", 1)[-1].split("/", 1)[0]
+    if host.lower().endswith(("t.me", "telegram.me")):
+        return None  # a t.me link we don't understand → let the resolver talk
+    return {
+        "chat_id": 0,
+        "username": None,
+        "label": host[:60],
+        "invite": url,
+        "type": "manual",
+    }
 
 
 def _button_url(entry):
@@ -158,7 +226,10 @@ def build_verify_keyboard(
         if not url:
             continue
         prefix = "🔄" if missing else "➕"
-        rows.append([InlineKeyboardButton(f"{prefix} {_button_label(entry)}", url=url)])
+        hand = "🖐 " if _is_manual(entry) else ""
+        rows.append(
+            [InlineKeyboardButton(f"{prefix} {hand}{_button_label(entry)}", url=url)]
+        )
 
     action = "✅ VERIFY AGAIN" if missing else "✅ VERIFY"
     rows.append(
@@ -229,10 +300,19 @@ async def _recipients() -> list:
 
 
 async def _notify_admins(client, title: str, body: str) -> None:
+    await _notify_admins_markup(client, title, body)
+
+
+async def _notify_admins_markup(client, title: str, body: str, markup=None) -> None:
     text = f"{title}\n\n{body}"
     for user_id in await _recipients():
         try:
-            await client.send_message(user_id, text, disable_web_page_preview=True)
+            await client.send_message(
+                user_id,
+                text,
+                reply_markup=markup,
+                disable_web_page_preview=True,
+            )
         except Exception:  # noqa: BLE001 - admin may not have started this bot
             LOGGER.debug(f"joinreq: could not notify admin {user_id}")
 
@@ -314,7 +394,9 @@ async def on_join_request(client, request: ChatJoinRequest):
     LOGGER.info(f"joinreq: request user={user.id} chat={chat.id} ({chat_title!r})")
     await jdb.bump(chat.id, "pending", 1, scope=scope)
 
-    required = _usable_required(doc.get("required"))
+    all_required = list(doc.get("required") or [])
+    required = _usable_required(all_required)          # bot-checkable chats
+    manual = _manual_required(all_required)            # admin-checked links
     auto = _flag(
         doc.get("auto_approve"),
         await sdb.get_setting(sdb.KEY_JOINREQ_AUTO, scope=scope, default=True),
@@ -327,13 +409,19 @@ async def on_join_request(client, request: ChatJoinRequest):
             "🚪 NEW JOIN REQUEST",
             f"👤 {user.first_name} ({_handle(user)})\n"
             f"🏘 {chat_title}\n"
-            f"📨 Verification DM bhej rahe hain…",
+            + (
+                f"🖐 {len(manual)} manual link(s) — admin verify karega\n"
+                if manual
+                else ""
+            )
+            + f"📨 Verification DM bhej rahe hain…",
         )
 
-    # Nothing to verify → that IS auto-approve. Let the person straight in,
-    # without any DM: a user who never started the bot cannot be DM'd at all,
-    # so waiting for a VERIFY tap would leave the request pending forever.
-    if auto and not required:
+    # Nothing to verify (no chats, no manual links) → that IS auto-approve. Let
+    # the person straight in, without any DM: a user who never started the bot
+    # cannot be DM'd at all, so waiting for a VERIFY tap would leave the request
+    # pending forever. Manual links always need a human, so they never qualify.
+    if auto and not all_required:
         if await _approve(client, chat.id, user, scope=scope):
             await jdb.bump(chat.id, "approved", 1, scope=scope)
             await _dm_approved(client, user, chat_title)
@@ -354,7 +442,7 @@ async def on_join_request(client, request: ChatJoinRequest):
         welcome or DEFAULT_WELCOME,
         name=user.first_name,
         chat=chat_title,
-        count=len(required),
+        count=len(all_required),
         first_name=user.first_name,
         last_name=user.last_name,
         username=user.username,
@@ -363,7 +451,7 @@ async def on_join_request(client, request: ChatJoinRequest):
         chat_username=chat_username,
     )
 
-    markup = build_verify_keyboard(chat.id, required, session["session_id"])
+    markup = build_verify_keyboard(chat.id, all_required, session["session_id"])
     try:
         await client.send_message(
             user.id, text, reply_markup=markup, disable_web_page_preview=True
@@ -547,7 +635,9 @@ async def verify_and_approve(client, query: CallbackQuery, payload):
     if not doc or not doc.get("enabled"):
         return await query.answer("Is group ka request controller band hai 🚫", show_alert=True)
 
-    required = _usable_required(doc.get("required"))
+    all_required = list(doc.get("required") or [])
+    required = _usable_required(all_required)
+    manual = _manual_required(all_required)
     attempts = await jdb.bump_attempt(session["session_id"])
 
     missing = []
@@ -577,10 +667,16 @@ async def verify_and_approve(client, query: CallbackQuery, payload):
     await jdb.set_session_status(session["session_id"], "verified")
 
     if session.get("is_test"):
+        extra = (
+            f"\n🖐 {len(manual)} manual link(s) hain — real request par admin "
+            f"unhe khud check karega."
+            if manual
+            else ""
+        )
         await _edit_card(
             query,
             "🧪 TEST PASSED\n\n"
-            f"Saare required chats check ho gaye ✅\n"
+            f"Saare bot-checkable chats check ho gaye ✅{extra}\n"
             f"(Ye test card tha, isliye koi join request approve nahi ki.)",
         )
         return await query.answer("✅ Test pass! Sab checks theek hain", show_alert=True)
@@ -590,6 +686,42 @@ async def verify_and_approve(client, query: CallbackQuery, payload):
         await sdb.get_setting(sdb.KEY_JOINREQ_AUTO, scope=scope, default=True),
     )
     notify = doc.get("notify_admins", True)
+
+    # ── manual links → a human must approve ──────────────────────────────
+    if manual:
+        names = ", ".join(_button_label(entry) for entry in manual[:5])
+        await _edit_card(
+            query,
+            "✅ Bot checks complete!\n\n"
+            f"Aapne saare group/channel join kar liye.\n\n"
+            f"🖐 Ab in links ko group admin khud check karega:\n{names}\n\n"
+            "Admin approve karega — thoda wait karo 🥺",
+        )
+        if notify:
+            await _notify_admins_markup(
+                client,
+                "🖐 MANUAL VERIFICATION NEEDED",
+                f"👤 {user.first_name} ({_handle(user)})\n"
+                f"🏘 {doc.get('title') or chat_id}\n"
+                f"🆔 User ID: {user.id}\n\n"
+                f"Bot-checkable chats: ✅ ho gaye\n"
+                f"🖐 Manual links: {names}\n\n"
+                f"User ne in links ko join kiya hai ya nahi, khud check karke "
+                f"decide karo:",
+                InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "✅ Approve", callback_data=f"jr_ok:{session['session_id']}"
+                            ),
+                            InlineKeyboardButton(
+                                "❌ Decline", callback_data=f"jr_no:{session['session_id']}"
+                            ),
+                        ]
+                    ]
+                ),
+            )
+        return await query.answer("✅ Verified! Admin manual check karega", show_alert=True)
 
     if not auto:
         await _edit_card(
@@ -647,6 +779,106 @@ async def verify_and_approve(client, query: CallbackQuery, payload):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+#  Manual approval (bot referral links etc.)
+# ══════════════════════════════════════════════════════════════════════════
+async def _is_admin(user_id: int) -> bool:
+    try:
+        if int(user_id) == int(getattr(config, "OWNER_ID", 0) or 0):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return bool(await adminsdb.is_admin(user_id))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def admin_decision(client, query: CallbackQuery, session_id: str, approve: bool):
+    """The ✅ Approve / ❌ Decline buttons on the admin's manual-check alert."""
+    scope = current_scope()
+    user = query.from_user
+    if user is None:
+        return await query.answer("Kuch galat ho gaya 😥", show_alert=True)
+
+    if not await _is_admin(user.id):
+        return await query.answer("Sirf admin ye kar sakta hai 🚫", show_alert=True)
+
+    session = await jdb.get_session(session_id, scope=scope)
+    if session is None:
+        return await query.answer("⏰ Session expire ho gaya", show_alert=True)
+
+    status = session.get("status")
+    if status in ("approved", "declined"):
+        return await query.answer(
+            f"Ye request pehle hi {status} ho chuki hai 🙂", show_alert=True
+        )
+    if session.get("is_test"):
+        return await query.answer("🧪 Ye test card tha, koi request nahi", show_alert=True)
+    # NOTE: no expiry check here — the admin may verify the manual link much
+    # later, and only *they* can decide.
+
+    chat_id = int(session.get("chat_id") or 0)
+    applicant = int(session.get("user_id") or 0)
+    doc = await jdb.get_chat(chat_id, scope=scope) or {}
+    title = doc.get("title") or str(chat_id)
+
+    if approve:
+        ok = await _approve(
+            client, chat_id, SimpleNamespace(id=applicant), scope=scope
+        )
+        if not ok:
+            return await query.answer(
+                "❌ Approve nahi hua — bot ke admin rights check karo", show_alert=True
+            )
+        await jdb.set_session_status(session_id, "approved")
+        await jdb.bump(chat_id, "approved", 1, scope=scope)
+        try:
+            await client.send_message(
+                applicant,
+                f"🎉 Aapki request {title} ke liye approve ho gayi!\n"
+                f"Group kholo aur enjoy karo ✨",
+                disable_web_page_preview=True,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        verdict = f"✅ Approved by {user.first_name or 'admin'}"
+        alert = "✅ Request approved"
+    else:
+        try:
+            await client.decline_chat_join_request(chat_id, applicant)
+        except RPCError as exc:  # noqa: BLE001
+            message = str(getattr(exc, "MESSAGE", "") or exc).lower()
+            if "hide_requester_missing" not in message and "not found" not in message:
+                LOGGER.warning(f"joinreq decline failed for {chat_id}: {exc}")
+                return await query.answer("❌ Decline nahi hua", show_alert=True)
+        await jdb.set_session_status(session_id, "declined")
+        await jdb.bump(chat_id, "failed", 1, scope=scope)
+        try:
+            await client.send_message(
+                applicant,
+                f"😕 Aapki join request {title} ke liye approve nahi hui.\n\n"
+                f"🖐 Jo manual link diye gaye the wo complete nahi mile. "
+                f"Group admin se baat karo.",
+                disable_web_page_preview=True,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        verdict = f"❌ Declined by {user.first_name or 'admin'}"
+        alert = "❌ Request declined"
+
+    message = query.message
+    try:
+        base = (getattr(message, "text", None) or getattr(message, "caption", None) or "")
+        if getattr(message, "photo", None) or getattr(message, "media", None):
+            await message.edit_caption(caption=f"{base}\n\n{verdict}")
+        else:
+            await message.edit_text(f"{base}\n\n{verdict}")
+    except Exception:  # noqa: BLE001
+        pass
+    return await query.answer(alert, show_alert=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
 #  Admin panel helpers
 # ══════════════════════════════════════════════════════════════════════════
 async def diagnose(client, chat_id: int, user_id: int) -> str:
@@ -673,11 +905,19 @@ async def diagnose(client, chat_id: int, user_id: int) -> str:
 
     # 2. every required entry
     required = doc.get("required") or []
+    manual = _manual_required(required)
     usable = _usable_required(required)
     if not required:
         lines.append("ℹ️ Koi required chat nahi — auto-approve turant hoga")
+    for entry in manual:
+        lines.append(
+            f"🖐 {_button_label(entry)} — manual link (admin verify karega, "
+            f"bot check nahi kar sakta)"
+        )
     for entry in required:
         label = _button_label(entry)
+        if _is_manual(entry):
+            continue
         try:
             cid_int = int(entry.get("chat_id") or 0)
         except Exception:  # noqa: BLE001
@@ -717,7 +957,8 @@ async def send_test_card(client, chat_id: int, user) -> bool:
     doc = await jdb.get_chat(chat_id)
     if not doc:
         return False
-    required = _usable_required(doc.get("required"))
+    all_required = list(doc.get("required") or [])
+    required = _usable_required(all_required)
     session = await jdb.create_session(user.id, chat_id, minutes=30, is_test=True)
     text = await _fill(
         doc.get("welcome")
@@ -725,7 +966,7 @@ async def send_test_card(client, chat_id: int, user) -> bool:
         or DEFAULT_WELCOME,
         name=user.first_name,
         chat=doc.get("title") or "is group",
-        count=len(required),
+        count=len(all_required),
         first_name=user.first_name,
         last_name=user.last_name,
         username=user.username,
@@ -738,7 +979,7 @@ async def send_test_card(client, chat_id: int, user) -> bool:
         await client.send_message(
             user.id,
             text,
-            reply_markup=build_verify_keyboard(chat_id, required, session["session_id"]),
+            reply_markup=build_verify_keyboard(chat_id, all_required, session["session_id"]),
             disable_web_page_preview=True,
         )
         return True
@@ -763,6 +1004,12 @@ _REF_INVITE = re.compile(
     r"|tg://join\?invite=([A-Za-z0-9_-]{6,})",
     re.IGNORECASE,
 )
+# t.me/<name><tail> — used to spot bot referral links (?start=…).
+_REF_TME = re.compile(
+    r"(?:https?://)?(?:www\.)?(?:t|telegram)\.me/([A-Za-z0-9_]{3,})([^\s]*)",
+    re.IGNORECASE,
+)
+_REF_URL = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
 
 async def _as_group(chat):
@@ -917,9 +1164,12 @@ __all__ = [
     "DEFAULT_TIMEOUT_MIN",
     "COUNTERS",
     "VERIFY_TTL",
+    "MANUAL_TYPES",
     "build_verify_keyboard",
     "on_join_request",
     "verify_and_approve",
+    "admin_decision",
+    "manual_entry",
     "diagnose",
     "send_test_card",
     "resolve_chat",

@@ -514,7 +514,8 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
 
     required = chat.get("required") or []
     usable = joinreq_service._usable_required(required)
-    skipped = len(required) - len(usable)
+    manual = joinreq_service._manual_required(required)
+    skipped = len(required) - len(usable) - len(manual)
     title = chat.get("title") or str(chat_id)
     uname = f"@{chat['username']}" if chat.get("username") else ""
 
@@ -548,9 +549,17 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     else:
         for index, entry in enumerate(required, 1):
             label = entry.get("label") or entry.get("username") or str(entry.get("chat_id"))
+            if joinreq_service._is_manual(entry):
+                lines.append(f"`{index}.` **{label}** — 🖐 manual (admin verify)")
+                continue
             handle = f"@{entry['username']}" if entry.get("username") else "private"
             bad = " ⚠️" if entry not in usable else ""
             lines.append(f"`{index}.` **{label}** — {handle}{bad}")
+        if manual:
+            lines.append(
+                "🖐 manual links bot check nahi kar sakta — VERIFY ke baad admin ko "
+                "Approve/Decline buttons aayenge."
+            )
     if skipped:
         lines.append(
             f"\n⚠️ `{skipped}` entry skip ho rahi hai (bot/user id — membership check "
@@ -574,7 +583,10 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     ]
     for index, entry in enumerate(required):
         label = (entry.get("label") or entry.get("username") or str(entry.get("chat_id")))[:18]
-        prefix = "⚠️" if entry not in usable else "🗑"
+        if joinreq_service._is_manual(entry):
+            prefix = "🖐"
+        else:
+            prefix = "⚠️" if entry not in usable else "🗑"
         rows.append([
             InlineKeyboardButton(f"{prefix} {label}", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
         ])
@@ -1065,7 +1077,10 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
                 "➕ **Required channel/group bhejo**\n\n"
                 "VERIFY se pehle user ko ye join karna hoga.\n"
                 "`@username`, `-100…` id ya `t.me/c/…` link bhejo — ya kisi "
-                "message ko yahan **forward** karo.\n"
+                "message ko yahan **forward** karo.\n\n"
+                "🖐 **Bot referral link** (`t.me/YourBot?start=ref`) ya koi website "
+                "link bhejo → wo **manual** requirement ban jayega: bot check nahi "
+                "karega, admin ko Approve/Decline buttons aayenge.\n\n"
                 "`/cancel` se cancel kar sakte ho.",
                 reply_markup=InlineKeyboardMarkup([[_back(f"ad_jr_set:{chat_id}")]]),
             )
@@ -1413,17 +1428,24 @@ async def _start_broadcast(user_id: int, flow: dict, source: Message):
         pass
 
 
-async def _pending_chat(message: Message, text: str):
+async def _pending_chat(message: Message, text: str, allow_manual: bool = False):
     """
     Resolve the group the admin pasted / forwarded.
 
     A **forwarded** message from the group is the friendliest input (Telegram
     hands us ``forward_from_chat``), and it is the only one that works for a
     private group whose invite link a bot is not allowed to read.
+
+    With ``allow_manual`` a bot-referral link (``t.me/Bot?start=…``) or any
+    external URL comes back as a *manual* requirement dict instead of a chat.
     """
     forwarded = getattr(message, "forward_from_chat", None)
     if forwarded is not None and getattr(forwarded, "type", None) != ChatType.PRIVATE:
         return forwarded, None
+    if allow_manual:
+        entry = joinreq_service.manual_entry(text)
+        if entry is not None:
+            return entry, None
     return await joinreq_service.resolve_chat(message._client, text)
 
 
@@ -1537,8 +1559,8 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
             pending_input.pop(user_id, None)
             await message.reply_text("❌ Wo group ab managed list mein nahi hai.")
             return True
-        chat, err = await _pending_chat(message, text)
-        if chat is None:
+        target, err = await _pending_chat(message, text, allow_manual=True)
+        if target is None:
             await message.reply_text(f"❌ {err}\n\n`/cancel` se cancel kar sakte ho.")
             return True
         required = list(doc.get("required") or [])
@@ -1546,10 +1568,29 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
             pending_input.pop(user_id, None)
             await message.reply_text(f"❌ Max {jdb.MAX_REQUIRED} required links ho sakte hain.")
             return True
+
+        # ── manual link (bot referral / website) — admin verifies by hand ──
+        if isinstance(target, dict):
+            url = target.get("invite")
+            if any(entry.get("invite") == url for entry in required):
+                await message.reply_text("❌ Ye link pehle se required list mein hai.")
+                return True
+            required.append(target)
+            await jdb.set_required(chat_id, required)
+            await message.reply_text(
+                f"🖐 **{target['label']}** manual requirement add ho gaya.\n\n"
+                f"Bot ise check nahi kar sakta — jab user VERIFY dabayega, admin ko "
+                f"Approve/Decline buttons aayenge.",
+                reply_markup=(await _jr_req_panel(chat_id))[1],
+            )
+            return True
+
+        chat = target
         if int(chat.id) >= 0:
             # A positive id can only be a user/bot; membership can't be checked.
             await message.reply_text(
-                "❌ Ye ek bot/user account hai — sirf channel ya group add karo."
+                "❌ Ye ek bot/user account hai — sirf channel ya group add karo.\n"
+                "Bot referral link (`t.me/Bot?start=…`) add karna hai to poora link bhejo."
             )
             return True
         if any(int(entry.get("chat_id") or 0) == int(chat.id) for entry in required):
