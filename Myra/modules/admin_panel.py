@@ -565,6 +565,10 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
             f"\n⚠️ `{skipped}` entry skip ho rahi hai (bot/user id — membership check "
             f"nahi ho sakta). Woh hata do."
         )
+    if required:
+        lines.append(
+            "✏️ kisi button se uska **naam** badal sakte ho · 🗑 se hatao."
+        )
 
     rows = [
         [
@@ -586,9 +590,12 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         if joinreq_service._is_manual(entry):
             prefix = "🖐"
         else:
-            prefix = "⚠️" if entry not in usable else "🗑"
+            prefix = "⚠️" if entry not in usable else "🔗"
         rows.append([
-            InlineKeyboardButton(f"{prefix} {label}", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
+            InlineKeyboardButton(
+                f"✏️ {prefix} {label}", callback_data=f"ad_jr_rlabel:{chat_id}:{index}"
+            ),
+            InlineKeyboardButton("🗑", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
         ])
     rows.append([
         InlineKeyboardButton("🧪 Test (DM card)", callback_data=f"ad_jr_test:{chat_id}"),
@@ -1110,6 +1117,42 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         await show(await _jr_req_panel(chat_id), f"🗑 {label} removed")
         return
 
+    if data.startswith("ad_jr_rlabel:"):
+        parts = data.split(":", 2)
+        if len(parts) != 3:
+            return await query.answer("❌ Galat data.", show_alert=True)
+        try:
+            chat_id, index = int(parts[1]), int(parts[2])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat data.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        required = list(doc.get("required") or [])
+        if not 0 <= index < len(required):
+            return await query.answer("❌ Ye entry nahi mili.", show_alert=True)
+        entry = required[index]
+        current = entry.get("label") or entry.get("username") or str(entry.get("chat_id"))
+        pending_input[user_id] = {
+            "kind": "jr_req_label",
+            "chat_id": chat_id,
+            "index": index,
+        }
+        try:
+            await query.message.edit_text(
+                "✏️ **Button ka naam badlo**\n\n"
+                f"Abhi: **{current}**\n\n"
+                "Naya naam bhejo (max 40 chars) — yahi naam user ke card mein join "
+                "button par dikhega.\n"
+                "`default` bhejo to auto-detected naam wapas aa jayega.\n\n"
+                "`/cancel` se cancel kar sakte ho.",
+                reply_markup=InlineKeyboardMarkup([[_back(f"ad_jr_set:{chat_id}")]]),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        await query.answer()
+        return
+
     # ── clones ─────────────────────────────────────────────────────────────
     if data == "ad_clones":
         await show(await _clones_panel())
@@ -1605,13 +1648,56 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
             "chat_id": int(chat.id),
             "username": getattr(chat, "username", None),
             "label": label[:60],
+            "auto_label": label[:60],
             "invite": await joinreq_service.invite_for(message._client, chat),
         })
         await jdb.set_required(chat_id, required)
         label = label[:40]
         await message.reply_text(
             f"➕ **{label}** add ho gaya — ab user ko VERIFY se pehle "
-            f"ye join karna hoga.",
+            f"ye join karna hoga.\n"
+            f"Button ka naam badalna ho to panel mein ✏️ dabao.",
+            reply_markup=(await _jr_req_panel(chat_id))[1],
+        )
+        return True
+
+    if kind == "jr_req_label":
+        chat_id = flow.get("chat_id")
+        try:
+            index = int(flow.get("index"))
+        except Exception:  # noqa: BLE001
+            index = -1
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            pending_input.pop(user_id, None)
+            await message.reply_text("❌ Wo group ab managed list mein nahi hai.")
+            return True
+        required = list(doc.get("required") or [])
+        if not 0 <= index < len(required):
+            pending_input.pop(user_id, None)
+            await message.reply_text("❌ Ye entry ab list mein nahi hai.")
+            return True
+
+        entry = dict(required[index])
+        new_label = " ".join(text.split())
+        if new_label.lower() in ("default", "reset"):
+            new_label = (
+                entry.get("auto_label")
+                or entry.get("username")
+                or str(entry.get("chat_id"))
+            )
+        if not new_label:
+            await message.reply_text("❌ Naam khali nahi ho sakta.")
+            return True
+        if len(new_label) > 40:
+            await message.reply_text("❌ 40 character se chhota naam do.")
+            return True
+        entry["label"] = new_label
+        required[index] = entry
+        await jdb.set_required(chat_id, required)
+        pending_input.pop(user_id, None)
+        await message.reply_text(
+            f"✏️ Button ka naam ab **{new_label}** hai.",
             reply_markup=(await _jr_req_panel(chat_id))[1],
         )
         return True

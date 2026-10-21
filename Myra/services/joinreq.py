@@ -174,6 +174,7 @@ def manual_entry(text: str):
             "chat_id": 0,
             "username": None,
             "label": f"@{name}",
+            "auto_label": f"@{name}",
             "invite": f"https://t.me/{name}{tail}",
             "type": "manual",
         }
@@ -189,6 +190,7 @@ def manual_entry(text: str):
         "chat_id": 0,
         "username": None,
         "label": host[:60],
+        "auto_label": host[:60],
         "invite": url,
         "type": "manual",
     }
