@@ -221,17 +221,17 @@ def build_verify_keyboard(
     *,
     missing: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Join buttons for every required chat + the VERIFY action."""
+    """Join buttons for every required chat + the VERIFY action.
+
+    The buttons show **exactly** the label the admin set (``✏️`` in the panel) —
+    no prefixes are added, so an emoji only appears if it is part of the name.
+    """
     rows = []
     for entry in required or []:
         url = _button_url(entry)
         if not url:
             continue
-        prefix = "🔄" if missing else "➕"
-        hand = "🖐 " if _is_manual(entry) else ""
-        rows.append(
-            [InlineKeyboardButton(f"{prefix} {hand}{_button_label(entry)}", url=url)]
-        )
+        rows.append([InlineKeyboardButton(_button_label(entry), url=url)])
 
     action = "✅ VERIFY AGAIN" if missing else "✅ VERIFY"
     rows.append(
@@ -274,6 +274,37 @@ async def _fill(
     for token in sorted(values, key=len, reverse=True):
         out = out.replace(token, values[token])
     return out
+
+
+async def welcome_photo(doc: dict = None, scope: str = None):
+    """Per-chat welcome photo, else the global one (``None`` = text card)."""
+    photo = (doc or {}).get("welcome_photo")
+    if photo:
+        return photo
+    try:
+        return await sdb.get_setting(sdb.KEY_JOINREQ_PHOTO, scope=scope, default=None)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _send_card(client, chat_id: int, text: str, markup=None, photo=None):
+    """Send the verification card — as a photo+caption when a photo is set."""
+    if photo:
+        try:
+            return await client.send_photo(
+                chat_id,
+                photo,
+                caption=text[:1024],
+                reply_markup=markup,
+            )
+        except Exception as exc:  # noqa: BLE001 - bad/expired file_id, no rights…
+            LOGGER.warning(
+                f"joinreq: photo card failed ({type(exc).__name__}: {exc}) — "
+                f"sending the text card instead"
+            )
+    return await client.send_message(
+        chat_id, text, reply_markup=markup, disable_web_page_preview=True
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -454,10 +485,9 @@ async def on_join_request(client, request: ChatJoinRequest):
     )
 
     markup = build_verify_keyboard(chat.id, all_required, session["session_id"])
+    photo = await welcome_photo(doc, scope=scope)
     try:
-        await client.send_message(
-            user.id, text, reply_markup=markup, disable_web_page_preview=True
-        )
+        await _send_card(client, user.id, text, markup, photo)
         LOGGER.info(
             f"joinreq: verification card sent to user={user.id} chat={chat.id} "
             f"session={session['session_id'][:8]}"
@@ -978,11 +1008,12 @@ async def send_test_card(client, chat_id: int, user) -> bool:
     )
     text = "🧪 TEST CARD — ye sirf aapke liye hai, kisi ko approve nahi karega.\n\n" + text
     try:
-        await client.send_message(
+        await _send_card(
+            client,
             user.id,
             text,
-            reply_markup=build_verify_keyboard(chat_id, all_required, session["session_id"]),
-            disable_web_page_preview=True,
+            build_verify_keyboard(chat_id, all_required, session["session_id"]),
+            await welcome_photo(doc),
         )
         return True
     except Exception as exc:  # noqa: BLE001

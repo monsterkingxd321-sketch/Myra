@@ -22,6 +22,32 @@ USERBOT_SESSIONS = bot_mongo["SessionDB"]["sessions"] if bot_mongo is not None e
 # }
 accounts = {}
 
+# ── Default behaviour of a freshly added userbot ───────────────────────────
+# A session that is logged in / uploaded should be *ready to chat* without any
+# extra panel tapping: AutoChat on, human "medium" pace, replies to every group
+# message and never skips one (100%).
+ACCOUNT_SETTINGS_VERSION = 2
+DEFAULT_SPEED_MODE = "medium"
+DEFAULT_REPLY_DELAY = 5000
+DEFAULT_GROUP_MODE = "all"
+DEFAULT_REPLY_CHANCE = 100.0
+
+
+def default_account_settings() -> dict:
+    """Behaviour defaults applied to every new (and upgraded) userbot."""
+    try:
+        autochat = bool(config.USERBOT_AUTOCHAT_DEFAULT)
+    except Exception:  # noqa: BLE001
+        autochat = True
+    return {
+        "autochat": autochat,
+        "reply_delay": DEFAULT_REPLY_DELAY,
+        "speed_mode": DEFAULT_SPEED_MODE,
+        "group_mode": DEFAULT_GROUP_MODE,
+        "reply_chance": DEFAULT_REPLY_CHANCE,
+        "settings_version": ACCOUNT_SETTINGS_VERSION,
+    }
+
 
 def _get_owner_id() -> int | None:
     if config.OWNER_ID:
@@ -237,6 +263,12 @@ __all__ = [
     "USERBOT_ACCOUNTS",
     "USERBOT_SESSIONS",
     "accounts",
+    "ACCOUNT_SETTINGS_VERSION",
+    "DEFAULT_SPEED_MODE",
+    "DEFAULT_REPLY_DELAY",
+    "DEFAULT_GROUP_MODE",
+    "DEFAULT_REPLY_CHANCE",
+    "default_account_settings",
     "get_served_accounts",
     "get_all_served_accounts",
     "get_accounts_by_user",

@@ -25,6 +25,7 @@ KEY_PRIVATE_CHANCE = "private_reply_chance"
 KEY_JOINREQ_ENABLED = "joinreq_enabled"
 KEY_JOINREQ_AUTO = "joinreq_autoapprove"
 KEY_JOINREQ_WELCOME = "joinreq_welcome"
+KEY_JOINREQ_PHOTO = "joinreq_welcome_photo"
 
 
 def _default_delay() -> int:

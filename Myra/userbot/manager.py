@@ -15,6 +15,8 @@ from Myra.userbot.storage import (
     remove_account,
     save_session,
     get_session,
+    ACCOUNT_SETTINGS_VERSION,
+    default_account_settings,
 )
 
 
@@ -56,12 +58,20 @@ class AccountManager:
         username = account_doc.get("username", "")
         name = account_doc.get("name", "")
         phone = account_doc.get("phone", "")
-        autochat = account_doc.get("autochat", config.USERBOT_AUTOCHAT_DEFAULT)
-        reply_delay = account_doc.get("reply_delay")
-        speed_mode = account_doc.get("speed_mode", "fast")
-        group_mode = account_doc.get("group_mode") or (
-            "all" if config.USERBOT_GROUP_REPLY_ALL else "mention"
-        )
+        defaults = default_account_settings()
+        if account_doc.get("settings_version") != ACCOUNT_SETTINGS_VERSION:
+            # Accounts created by older builds had no behaviour defaults (fast /
+            # global chance / mention-only). Upgrade them once so every userbot
+            # starts the same way: AutoChat on, medium pace, every group message,
+            # 100% reply chance. After this they keep whatever the admin sets.
+            await update_account(account_id, defaults, scope=scope)
+            account_doc = {**account_doc, **defaults}
+            LOGGER.info(f"⚙️ Applied default userbot settings to {account_id}")
+
+        autochat = account_doc.get("autochat", defaults["autochat"])
+        reply_delay = account_doc.get("reply_delay", defaults["reply_delay"])
+        speed_mode = account_doc.get("speed_mode") or defaults["speed_mode"]
+        group_mode = account_doc.get("group_mode") or defaults["group_mode"]
         reply_chance = account_doc.get("reply_chance")
 
         added_by = account_doc.get("added_by")

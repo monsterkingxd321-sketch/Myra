@@ -405,10 +405,11 @@ def _jr_count(chats: list, key: str) -> int:
 
 
 async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
-    enabled, auto, welcome, chats = await asyncio.gather(
+    enabled, auto, welcome, photo, chats = await asyncio.gather(
         _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_ENABLED, default=False), False),
         _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_AUTO, default=True), True),
         _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_WELCOME, default=None), None),
+        _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_PHOTO, default=None), None),
         _safe(jdb.list_managed(), []),
     )
 
@@ -445,6 +446,7 @@ async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "✨ **Welcome card:**\n"
         f"`{preview}`\n"
+        f"🖼 **Photo:** {'✅ set' if photo else '❌ koi nahi (text card)'}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "ℹ️ Har managed group mein bot ko **admin** hona chahiye "
         "(Invite users + Manage chat). Setup ke baad us group ko kholo → "
@@ -461,6 +463,11 @@ async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton("✨ Welcome Message", callback_data="ad_jr_wel"),
+            InlineKeyboardButton(
+                f"🖼 Photo {'✅' if photo else '❌'}", callback_data="ad_jr_photo"
+            ),
+        ],
+        [
             InlineKeyboardButton("🔁 Reset Stats", callback_data="ad_jr_reset"),
         ],
         [_back()],
@@ -529,6 +536,7 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         timeout = jdb.DEFAULT_TIMEOUT_MIN
     notify = chat.get("notify_admins", True)
     welcome = chat.get("welcome")
+    photo = chat.get("welcome_photo")
     counters = chat.get("counters") or {}
 
     lines = [
@@ -537,7 +545,8 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         f"🤖 **Auto-approve:** {'✅ ON' if auto else '❌ OFF'} _{auto_src}_",
         f"⏱ **Session timeout:** `{timeout} min`",
         f"🔔 **Admin alerts:** {'✅ ON' if notify else '❌ OFF'}",
-        f"✨ **Welcome:** {'custom' if welcome else 'default'}",
+        f"✨ **Welcome:** {'custom' if welcome else 'default'}"
+        f" · 🖼 **Photo:** {'set' if photo else 'none (global)'}",
         f"📨 Requests: `{counters.get('pending', 0)}` · ✅ `{counters.get('verified', 0)}`"
         f" · 🚪 `{counters.get('approved', 0)}` · ❌ `{counters.get('failed', 0)}`",
         "",
@@ -583,7 +592,12 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
             ),
             InlineKeyboardButton("✨ Welcome", callback_data=f"ad_jr_cwel:{chat_id}"),
         ],
-        [InlineKeyboardButton("➕ Add Channel/Group", callback_data=f"ad_jr_radd:{chat_id}")],
+        [
+            InlineKeyboardButton(
+                f"🖼 Photo {'✅' if photo else '❌'}", callback_data=f"ad_jr_cphoto:{chat_id}"
+            ),
+            InlineKeyboardButton("➕ Add Channel/Group", callback_data=f"ad_jr_radd:{chat_id}"),
+        ],
     ]
     for index, entry in enumerate(required):
         label = (entry.get("label") or entry.get("username") or str(entry.get("chat_id")))[:18]
@@ -929,6 +943,25 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         await query.answer()
         return
 
+    if data == "ad_jr_photo":
+        current = await ai_settings.get_setting(ai_settings.KEY_JOINREQ_PHOTO, default=None)
+        pending_input[user_id] = {"kind": "jr_welcome_photo_global"}
+        try:
+            await query.message.edit_text(
+                "🖼 **Welcome photo (global default)**\n\n"
+                f"Abhi: {'✅ set hai' if current else '❌ koi nahi (sirf text card)'}\n\n"
+                "DM card ke saath jo **photo** bhejni hai wo yahan bhejo "
+                "(caption optional hai).\n"
+                "Photo hataani ho to `remove` bhejo.\n"
+                "Kisi ek group ke liye alag photo: Must-join Setup → 🖼 Photo.\n"
+                "`/cancel` se cancel kar sakte ho.",
+                reply_markup=InlineKeyboardMarkup([[_back("ad_jr")]]),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        await query.answer()
+        return
+
     if data == "ad_jr_add":
         pending_input[user_id] = {"kind": "jr_add"}
         try:
@@ -1033,6 +1066,32 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
                 "`{user_id}` · `{chat_username}`\n"
                 "(purane `{name}` · `{chat}` · `{count}` bhi chalte hain)\n\n"
                 "`default` bhejo to is group ka custom text hata kar global/default "
+                "wapas lagega.\n"
+                "`/cancel` se cancel kar sakte ho.",
+                reply_markup=InlineKeyboardMarkup([[_back(f"ad_jr_set:{chat_id}")]]),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        await query.answer()
+        return
+
+    if data.startswith("ad_jr_cphoto:"):
+        try:
+            chat_id = int(data.split(":", 1)[1])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat group id.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        current = doc.get("welcome_photo")
+        pending_input[user_id] = {"kind": "jr_welcome_photo", "chat_id": chat_id}
+        try:
+            await query.message.edit_text(
+                "🖼 **Welcome photo — sirf is group ke liye**\n\n"
+                f"Abhi: {'✅ set hai' if current else '❌ is group ka apna nahi (global)'}\n\n"
+                "DM card ke saath jo **photo** bhejni hai wo yahan bhejo "
+                "(caption optional hai).\n"
+                "`remove` bhejo to is group ka photo hata kar global/default "
                 "wapas lagega.\n"
                 "`/cancel` se cancel kar sakte ho.",
                 reply_markup=InlineKeyboardMarkup([[_back(f"ad_jr_set:{chat_id}")]]),
@@ -1499,6 +1558,44 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
     # it, Python treats it as a local — so it must be bound up front or the
     # ``jr_*`` branches die with UnboundLocalError (silently, in the log).
     text = (message.text or "").strip()
+
+    if kind in ("jr_welcome_photo", "jr_welcome_photo_global"):
+        chat_id = flow.get("chat_id")
+        group_scope = kind == "jr_welcome_photo"
+        if group_scope:
+            doc = await jdb.get_chat(chat_id)
+            if not doc:
+                pending_input.pop(user_id, None)
+                await message.reply_text("❌ Wo group ab managed list mein nahi hai.")
+                return True
+        photo = getattr(message, "photo", None)
+        if photo is not None:
+            file_id = getattr(photo, "file_id", None)
+            if group_scope:
+                await jdb.set_option(chat_id, "welcome_photo", file_id)
+                note = "🖼 Is group ka welcome photo set ho gaya."
+                markup = (await _jr_req_panel(chat_id))[1]
+            else:
+                await ai_settings.set_setting(ai_settings.KEY_JOINREQ_PHOTO, file_id)
+                note = "🖼 Global welcome photo set ho gaya."
+                markup = (await _jr_panel())[1]
+        elif text.lower() in ("remove", "clear", "delete", "default", "off", "no"):
+            if group_scope:
+                await jdb.set_option(chat_id, "welcome_photo", None)
+                note = "🗑 Is group ka photo hata diya (global/default lagega)."
+                markup = (await _jr_req_panel(chat_id))[1]
+            else:
+                await ai_settings.set_setting(ai_settings.KEY_JOINREQ_PHOTO, None)
+                note = "🗑 Global welcome photo hata diya."
+                markup = (await _jr_panel())[1]
+        else:
+            await message.reply_text(
+                "❌ Photo bhejo (ya `remove` likho).\n`/cancel` se cancel kar sakte ho."
+            )
+            return True
+        pending_input.pop(user_id, None)
+        await message.reply_text(note, reply_markup=markup)
+        return True
 
     if kind == "delay":
         if not text.isdigit():

@@ -43,6 +43,7 @@ from Myra.database.scope import current_scope
 from Myra.userbot.storage import (
     accounts as ub_accounts,
     add_account,
+    default_account_settings,
     save_session,
 )
 
@@ -532,11 +533,7 @@ async def add_from_session_string(
         "phone": phone,
         "added_by": int(added_by),
         "scope": current_scope(),
-        "autochat": config.USERBOT_AUTOCHAT_DEFAULT,
-        "reply_delay": None,
-        "speed_mode": "fast",
-        "group_mode": None,
-        "reply_chance": None,
+        **default_account_settings(),
         "status": "CONNECTED",
     }
 
@@ -548,11 +545,7 @@ async def add_from_session_string(
         "phone": phone,
         "added_by": int(added_by),
         "enabled": True,
-        "autochat": config.USERBOT_AUTOCHAT_DEFAULT,
-        "reply_delay": None,
-        "speed_mode": "fast",
-        "group_mode": None,
-        "reply_chance": None,
+        **default_account_settings(),
         "status": "CONNECTED",
         "source": source,
         "created_at": time.time(),

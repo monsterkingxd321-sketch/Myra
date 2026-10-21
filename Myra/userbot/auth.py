@@ -19,6 +19,7 @@ from Myra.userbot.storage import (
     USERBOT_SESSIONS,
     accounts as ub_accounts,
     add_account,
+    default_account_settings,
     save_session,
 )
 
@@ -364,11 +365,7 @@ async def complete_login(owner_id: int) -> dict:
         "phone": phone,
         "added_by": int(owner_id),
         "enabled": True,
-        "autochat": config.USERBOT_AUTOCHAT_DEFAULT,
-        "reply_delay": None,
-        "speed_mode": "fast",
-        "group_mode": None,
-        "reply_chance": None,
+        **default_account_settings(),
         "status": "CONNECTED",
         "created_at": time.time(),
     }
@@ -394,11 +391,7 @@ async def complete_login(owner_id: int) -> dict:
         "phone": phone,
         "added_by": int(owner_id),
         "scope": current_scope(),
-        "autochat": config.USERBOT_AUTOCHAT_DEFAULT,
-        "reply_delay": None,
-        "speed_mode": "fast",
-        "group_mode": None,
-        "reply_chance": None,
+        **default_account_settings(),
         "status": "CONNECTED",
     }
 
@@ -412,10 +405,6 @@ async def complete_login(owner_id: int) -> dict:
         "name": full_name,
         "phone": phone,
         "added_by": int(owner_id),
-        "autochat": config.USERBOT_AUTOCHAT_DEFAULT,
-        "reply_delay": None,
-        "speed_mode": "fast",
-        "group_mode": None,
-        "reply_chance": None,
+        **default_account_settings(),
         "status": "CONNECTED",
     }
