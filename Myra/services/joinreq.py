@@ -1,24 +1,26 @@
 """
 Group Request Controller — the ``chat_join_request`` flow.
 
-Ported logic (from the Telegram-Join-Request-Bot pattern) trimmed down to what a
-single bot + its clones actually need:
+Same behaviour as the reference "Telegram-Join-Request-Bot":
 
     1. User taps "Ask to join" on a group with request-to-join switched on.
-    2. Telegram fires a ChatJoinRequest. We DM the user a welcome card listing
-       the channels/groups they must join first.
-    3. The user taps **VERIFY**. We re-check membership with ``get_chat_member``.
-    4. ✅ all joined → auto-approve the request (or, if auto-approve is off,
-       mark them verified and tell the group's admins).
-    ❌ someone skipped a channel → keep the request pending and nudge them.
+    2. Telegram fires a ChatJoinRequest → we count it, tell the admins, and DM
+       the user a verification card (one join button per required chat + VERIFY).
+    3. Each card belongs to a **verification session** (uuid, 30 min by default),
+       so a leaked/old button can never approve a later request.
+    4. VERIFY re-checks every required chat with ``get_chat_member``:
+        ❌ someone missing → card turns into "MISSING REQUIREMENTS" and only the
+           still-missing chats are shown ("VERIFY AGAIN");
+        ✅ all joined → auto-approve (default) or notify the admins.
+    5. A required entry that Telegram cannot check (deleted chat, a *bot*
+       username, …) is skipped instead of blocking the applicant forever.
 
-The bot must be an **admin** in the managed group (with "Manage chat"/"Invite
-users" permission) for ``approve_chat_join_request`` to work.
+The bot must be an **admin** in the managed group (with "Invite users" +
+"Manage chat") for ``approve_chat_join_request`` to work.
 
 Everything is scope-aware: a clone bot only controls its own groups.
 """
 
-import html as _html
 import re
 import time
 from types import SimpleNamespace
@@ -26,11 +28,16 @@ from types import SimpleNamespace
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.errors import (
     BadRequest,
+    ChannelInvalid,
     ChannelPrivate,
     ChatAdminRequired,
     Forbidden,
+    PeerIdInvalid,
     RPCError,
+    UserAlreadyParticipant,
     UserNotParticipant,
+    UsernameInvalid,
+    UsernameNotOccupied,
 )
 from pyrogram.raw import functions as raw_functions
 from pyrogram.raw import types as raw_types
@@ -42,57 +49,203 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
 )
 
-from Myra import LOGGER
+from Myra import LOGGER, config
+from Myra.database import admins as adminsdb
 from Myra.database import joinreq as jdb
 from Myra.database import settings as sdb
 from Myra.database.scope import current_scope
 
+DEFAULT_TIMEOUT_MIN = 30
+
 DEFAULT_WELCOME = (
-    "Hey {name} ✨\n\n"
-    "{chat} mein aapki request aa gayi hai!\n\n"
-    "Aage badhne se pehle neeche wali sab communities join kar lo, "
-    "phir **VERIFY** dabao 🥺"
+    "Welcome, {first_name}! 👋\n\n"
+    "Aapki request {chat_title} join karne ki aa gayi hai.\n\n"
+    "Approve hone se pehle neeche wali saari channels/groups join karo, "
+    "phir VERIFY dabao ✅"
 )
 
-# {(chat_id, user_id): last verify timestamp} — anti hammering
+#: Minimum gap between two VERIFY taps by the same user (anti hammering).
+VERIFY_TTL = 5  # seconds
 _last_verify: dict = {}
-VERIFY_TTL = 45  # seconds
+
+#: Bumped counters beyond the original three.
+COUNTERS = ("pending", "verified", "approved", "failed", "expired")
 
 
-def _esc(value) -> str:
-    return _html.escape(str(value or ""))
+def _handle(user) -> str:
+    """``@username`` when there is one, otherwise the numeric id."""
+    username = getattr(user, "username", None)
+    if username:
+        return f"@{username}"
+    return f"ID: {getattr(user, 'id', 0)}"
 
 
-def build_verify_keyboard(chat_id: int, required: list) -> InlineKeyboardMarkup:
-    rows = []
+def _u(user):
+    """Normalise a Telegram user to the fields we print.
+
+    Old cached ``User`` objects, clone clients and the offline tests can all
+    hand us an object without ``last_name``/``username``; normalising once
+    keeps the rest of the file simple.
+    """
+    return SimpleNamespace(
+        id=int(getattr(user, "id", 0) or 0),
+        first_name=getattr(user, "first_name", None) or "user",
+        last_name=getattr(user, "last_name", None) or "",
+        username=getattr(user, "username", None),
+        is_bot=bool(getattr(user, "is_bot", False)),
+    )
+
+
+def _flag(value, default: bool) -> bool:
+    """``None`` means "use the global default"."""
+    return default if value is None else bool(value)
+
+
+def _usable_required(required) -> list:
+    """Drop entries Telegram can never verify (bots, users, broken ids).
+
+    The reference bot skips ``type == "bot"``; a positive id can only be a
+    user/bot, so both are filtered here. Without this one bad entry makes
+    every applicant fail VERIFY forever.
+    """
+    out = []
     for entry in required or []:
-        label = entry.get("label") or entry.get("username") or "Join"
-        url = None
-        if entry.get("username"):
-            url = f"https://t.me/{entry['username']}"
-        elif entry.get("invite"):
-            url = entry["invite"]
-        if not url:
+        try:
+            chat_id = int(entry.get("chat_id") or 0)
+        except Exception:  # noqa: BLE001
+            chat_id = 0
+        kind = str(entry.get("type") or "").lower()
+        if kind == "bot" or chat_id >= 0:
+            LOGGER.warning(
+                f"joinreq: ignoring unverifiable required entry "
+                f"{entry.get('label') or entry.get('username') or chat_id!r} "
+                f"(bots/users can't be membership-checked)"
+            )
             continue
-        rows.append([InlineKeyboardButton(f"➕ {_esc(label)}", url=url)])
-
-    rows.append([InlineKeyboardButton("✅ VERIFY", callback_data=f"jr_v:{int(chat_id)}")])
-    return InlineKeyboardMarkup(rows)
-
-
-async def _fill(text: str, *, name: str, chat: str, count: int) -> str:
-    """Replace ``{name}`` / ``{chat}`` / ``{count}`` without str.format(), so an
-    owner's custom welcome can safely contain literal braces."""
-    out = text or DEFAULT_WELCOME
-    for token, value in (("{name}", name), ("{chat}", chat), ("{count}", str(count))):
-        out = out.replace(token, value)
+        out.append(entry)
     return out
 
 
+def _button_url(entry):
+    if entry.get("invite"):
+        return entry["invite"]
+    username = entry.get("username")
+    if username:
+        return f"https://t.me/{str(username).lstrip('@')}"
+    return None
+
+
+def _button_label(entry) -> str:
+    return str(
+        entry.get("label")
+        or entry.get("title")
+        or entry.get("username")
+        or "Join"
+    )[:40]
+
+
+def build_verify_keyboard(
+    chat_id: int,
+    required: list = None,
+    session_id: str = None,
+    *,
+    missing: bool = False,
+) -> InlineKeyboardMarkup:
+    """Join buttons for every required chat + the VERIFY action."""
+    rows = []
+    for entry in required or []:
+        url = _button_url(entry)
+        if not url:
+            continue
+        prefix = "🔄" if missing else "➕"
+        rows.append([InlineKeyboardButton(f"{prefix} {_button_label(entry)}", url=url)])
+
+    action = "✅ VERIFY AGAIN" if missing else "✅ VERIFY"
+    rows.append(
+        [InlineKeyboardButton(action, callback_data=f"jr_v:{session_id or int(chat_id)}")]
+    )
+    return InlineKeyboardMarkup(rows)
+
+
+async def _fill(
+    text: str,
+    *,
+    name: str = "dost",
+    chat: str = "is group",
+    count: int = 0,
+    first_name: str = None,
+    last_name: str = None,
+    username: str = None,
+    user_id: int = None,
+    chat_title: str = None,
+    chat_username: str = None,
+) -> str:
+    """Replace ``{name}``/``{chat}``/``{count}`` **and** the reference bot's
+    variables (``{first_name}``, ``{chat_title}``, …) without ``str.format``,
+    so a custom welcome can safely contain literal braces."""
+    first = first_name or name
+    title = chat_title or chat
+    values = {
+        "{first_name}": first,
+        "{last_name}": last_name or "",
+        "{username}": f"@{username}" if username else first,
+        "{user_id}": str(user_id or ""),
+        "{chat_title}": title,
+        "{chat_username}": f"@{chat_username}" if chat_username else title,
+        "{count}": str(count),
+        "{name}": name,
+        "{chat}": chat,
+    }
+    out = text or DEFAULT_WELCOME
+    # longest first: "{chat}" must not eat the start of "{chat_title}"
+    for token in sorted(values, key=len, reverse=True):
+        out = out.replace(token, values[token])
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Admin notifications
+# ══════════════════════════════════════════════════════════════════════════
+async def _recipients() -> list:
+    """Owner first, then every panel admin (deduped, order preserved)."""
+    ids: list = []
+    try:
+        owner = int(getattr(config, "OWNER_ID", 0) or 0)
+        if owner:
+            ids.append(owner)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        for admin_id in await adminsdb.get_admin_ids() or []:
+            try:
+                admin_id = int(admin_id)
+            except Exception:  # noqa: BLE001
+                continue
+            if admin_id and admin_id not in ids:
+                ids.append(admin_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return ids
+
+
+async def _notify_admins(client, title: str, body: str) -> None:
+    text = f"{title}\n\n{body}"
+    for user_id in await _recipients():
+        try:
+            await client.send_message(user_id, text, disable_web_page_preview=True)
+        except Exception:  # noqa: BLE001 - admin may not have started this bot
+            LOGGER.debug(f"joinreq: could not notify admin {user_id}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Approve / welcome
+# ══════════════════════════════════════════════════════════════════════════
 async def _approve(client, chat_id: int, user, scope: str = None) -> bool:
     """Approve one pending join request. Returns True on success."""
     try:
         await client.approve_chat_join_request(chat_id, user.id)
+    except UserAlreadyParticipant:
+        return True
     except ChatAdminRequired:
         LOGGER.warning(
             f"joinreq: cannot approve {user.id} in {chat_id} — the bot is not an "
@@ -100,209 +253,498 @@ async def _approve(client, chat_id: int, user, scope: str = None) -> bool:
         )
         return False
     except RPCError as exc:  # noqa: BLE001
+        message = str(getattr(exc, "MESSAGE", "") or exc).lower()
+        if "hide_requester_missing" in message or "request not found" in message:
+            # The request was already approved/declined in Telegram.
+            return True
         LOGGER.warning(f"joinreq approve failed for {chat_id}: {exc}")
         return False
 
-    await jdb.bump(chat_id, "approved", 1, scope=scope)
     LOGGER.info(f"joinreq: approved {user.id} in {chat_id}")
     return True
 
 
-async def _dm_welcome(client, user, title: str) -> None:
+async def _dm_approved(client, user, title: str) -> None:
     """Best-effort "you're in" DM after an instant approval (never blocks)."""
     try:
         await client.send_message(
             int(user.id),
-            f"🎉 Welcome to {_esc(title)}!\nAapki join request approve ho gayi ✨",
+            f"🎉 Welcome to {title}!\nAapki join request approve ho gayi ✨",
             disable_web_page_preview=True,
         )
     except Exception:  # noqa: BLE001
         pass
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  Incoming request
+# ══════════════════════════════════════════════════════════════════════════
 async def on_join_request(client, request: ChatJoinRequest):
     """Entry point — called by the ChatJoinRequest handler."""
-    try:
-        chat = request.chat
-        user = request.user
-    except Exception:  # noqa: BLE001
+    chat = getattr(request, "chat", None)
+    # Newer Pyrogram forks (Kurigram, the one we ship) renamed ``user`` to
+    # ``from_user``. Accept both, otherwise ``user`` is None and every request
+    # is silently ignored — the whole feature looks dead.
+    user = getattr(request, "from_user", None) or getattr(request, "user", None)
+    if chat is None or user is None or getattr(user, "is_bot", False):
         return
 
-    if user is None or getattr(user, "is_bot", False):
-        return
+    user = _u(user)
+    chat_title = getattr(chat, "title", None) or str(chat.id)
+    chat_username = getattr(chat, "username", None)
 
     scope = current_scope()
 
     enabled = await sdb.get_setting(sdb.KEY_JOINREQ_ENABLED, scope=scope, default=False)
     if not enabled:
+        LOGGER.debug(f"joinreq: controller is OFF — ignoring request in {chat.id}")
         return
 
     doc = await jdb.get_chat(chat.id, scope=scope)
-    if not doc or not doc.get("enabled"):
+    if not doc:
+        LOGGER.info(
+            f"joinreq: request in {chat.id} ({chat_title!r}) ignored — group is not "
+            "in the managed list"
+        )
+        return
+    if not doc.get("enabled"):
+        LOGGER.info(f"joinreq: request in {chat.id} ignored — group is paused")
         return
 
-    required = doc.get("required") or []
-    auto = await sdb.get_setting(sdb.KEY_JOINREQ_AUTO, scope=scope, default=True)
+    LOGGER.info(f"joinreq: request user={user.id} chat={chat.id} ({chat_title!r})")
+    await jdb.bump(chat.id, "pending", 1, scope=scope)
+
+    required = _usable_required(doc.get("required"))
+    auto = _flag(
+        doc.get("auto_approve"),
+        await sdb.get_setting(sdb.KEY_JOINREQ_AUTO, scope=scope, default=True),
+    )
+    notify = doc.get("notify_admins", True)
+
+    if notify:
+        await _notify_admins(
+            client,
+            "🚪 NEW JOIN REQUEST",
+            f"👤 {user.first_name} ({_handle(user)})\n"
+            f"🏘 {chat_title}\n"
+            f"📨 Verification DM bhej rahe hain…",
+        )
 
     # Nothing to verify → that IS auto-approve. Let the person straight in,
     # without any DM: a user who never started the bot cannot be DM'd at all,
     # so waiting for a VERIFY tap would leave the request pending forever.
     if auto and not required:
         if await _approve(client, chat.id, user, scope=scope):
-            await _dm_welcome(client, user, chat.title or "the group")
+            await jdb.bump(chat.id, "approved", 1, scope=scope)
+            await _dm_approved(client, user, chat_title)
         return
 
-    welcome = await sdb.get_setting(sdb.KEY_JOINREQ_WELCOME, scope=scope, default=None)
+    try:
+        minutes = int(doc.get("timeout_minutes") or DEFAULT_TIMEOUT_MIN)
+    except Exception:  # noqa: BLE001
+        minutes = DEFAULT_TIMEOUT_MIN
+    minutes = max(1, min(minutes, 1440))
+
+    session = await jdb.create_session(user.id, chat.id, minutes=minutes, scope=scope)
+
+    welcome = doc.get("welcome") or await sdb.get_setting(
+        sdb.KEY_JOINREQ_WELCOME, scope=scope, default=None
+    )
     text = await _fill(
         welcome or DEFAULT_WELCOME,
-        name=_esc(user.first_name or "dost"),
-        chat=_esc(chat.title or "is group"),
+        name=user.first_name,
+        chat=chat_title,
         count=len(required),
+        first_name=user.first_name,
+        last_name=user.last_name,
+        username=user.username,
+        user_id=user.id,
+        chat_title=chat_title,
+        chat_username=chat_username,
     )
 
-    markup = build_verify_keyboard(chat.id, required)
+    markup = build_verify_keyboard(chat.id, required, session["session_id"])
     try:
-        await client.send_message(user.id, text, reply_markup=markup, disable_web_page_preview=True)
-        await jdb.bump(chat.id, "pending", 1, scope=scope)
+        await client.send_message(
+            user.id, text, reply_markup=markup, disable_web_page_preview=True
+        )
+        LOGGER.info(
+            f"joinreq: verification card sent to user={user.id} chat={chat.id} "
+            f"session={session['session_id'][:8]}"
+        )
     except (Forbidden, UserNotParticipant) as exc:
         # The user never opened the bot, so Telegram refuses the DM. The request
-        # stays pending — log it loudly, otherwise the feature looks "dead".
+        # stays pending — say so loudly (admin + log), otherwise the feature
+        # looks "dead" even though everything else worked.
         LOGGER.warning(
             f"joinreq: cannot DM {user.id} ({user.first_name!r}) — they never "
             f"started the bot, so the VERIFY card could not be sent and the "
             f"request for {chat.id} stays pending. ({exc})"
         )
+        if notify:
+            await _notify_admins(
+                client,
+                "⚠️ VERIFICATION DM FAILED",
+                f"👤 {user.first_name} ({_handle(user)})\n"
+                f"🏘 {chat_title}\n\n"
+                f"Usne bot ko /start nahi kiya, isliye VERIFY card nahi gaya.\n"
+                f"Request pending hai — Telegram se manually approve/decline karo.",
+            )
     except BadRequest as exc:
         LOGGER.warning(f"joinreq DM rejected for {user.id}: {exc}")
     except RPCError as exc:  # noqa: BLE001
         LOGGER.warning(f"joinreq DM error: {exc}")
 
 
-async def _member_ok(client, chat_id: int, user_id: int) -> bool:
-    """True when the user really is a member of the required chat."""
+# ══════════════════════════════════════════════════════════════════════════
+#  Membership check
+# ══════════════════════════════════════════════════════════════════════════
+async def _member_ok(client, entry, user_id: int) -> bool:
+    """True when the user really is a member of the required chat.
+
+    ``entry`` is the required-chat dict (or a plain chat id). The id is tried
+    first; if this bot session has never seen that chat (``PeerIdInvalid`` /
+    ``ChannelInvalid`` — very common for a freshly added required chat) we retry
+    with the public ``@username``, which always resolves.
+
+    An entry we cannot check at all (deleted chat, a bot/user id, missing
+    rights) is treated as satisfied: blocking honest users because of a broken
+    config is worse than letting one through.
+    """
+    username = None
+    if isinstance(entry, dict):
+        username = entry.get("username")
+        chat_id = entry.get("chat_id")
+    else:
+        chat_id = entry
     try:
-        member = await client.get_chat_member(chat_id, user_id)
-    except UserNotParticipant:
-        return False
-    except (ChannelPrivate, ChatAdminRequired):
-        # The bot cannot see this chat (not a member / not admin). Enforcing it
-        # would reject honest users, so we skip it and just log a warning.
-        LOGGER.debug(f"joinreq: cannot check membership for {chat_id}")
+        chat_id = int(chat_id or 0)
+    except Exception:  # noqa: BLE001
+        chat_id = 0
+    if chat_id >= 0:  # user / bot / missing id — nothing to check
         return True
-    except RPCError:  # noqa: BLE001
-        return False
+
+    targets = [chat_id]
+    if username:
+        handle = f"@{str(username).lstrip('@')}"
+        if handle not in targets:
+            targets.append(handle)
+
+    member = None
+    last_error = None
+    for target in targets:
+        try:
+            member = await client.get_chat_member(target, user_id)
+            break
+        except UserNotParticipant:
+            return False
+        except (ChannelPrivate, ChatAdminRequired):
+            LOGGER.debug(f"joinreq: cannot check membership for {chat_id} (no access)")
+            return True
+        except (PeerIdInvalid, UsernameInvalid, UsernameNotOccupied, ChannelInvalid) as exc:
+            last_error = exc  # unknown peer for this session → try the next target
+            continue
+        except RPCError as exc:  # noqa: BLE001
+            LOGGER.warning(f"joinreq: membership check failed for {chat_id}: {exc}")
+            return True
+
+    if member is None:
+        LOGGER.warning(
+            f"joinreq: required chat {chat_id} is not resolvable — skipping it "
+            f"({last_error})"
+        )
+        return True
 
     status = member.status
-    return status not in (ChatMemberStatus.BANNED, ChatMemberStatus.LEFT, ChatMemberStatus.RESTRICTED)
+    return status not in (
+        ChatMemberStatus.BANNED,
+        ChatMemberStatus.LEFT,
+        ChatMemberStatus.RESTRICTED,
+    )
 
 
-async def verify_and_approve(client, query: CallbackQuery, chat_id: int):
-    """The VERIFY button. Re-checks every required chat, then approves or notifies."""
+async def _edit_card(query: CallbackQuery, text: str, markup=None):
+    """Works for text cards and (future) photo cards."""
+    message = query.message
+    try:
+        if getattr(message, "photo", None) or getattr(message, "media", None):
+            return await message.edit_caption(caption=text, reply_markup=markup)
+        return await message.edit_text(
+            text, reply_markup=markup, disable_web_page_preview=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.debug(f"joinreq: card edit failed: {exc}")
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  VERIFY button
+# ══════════════════════════════════════════════════════════════════════════
+async def verify_and_approve(client, query: CallbackQuery, payload):
+    """The VERIFY button.
+
+    ``payload`` is a session id (new cards) or a chat id (cards sent before
+    sessions existed — they still work).
+    """
     user = query.from_user
     if user is None:
         return await query.answer("Kuch galat ho gaya 😥", show_alert=True)
+    user = _u(user)
 
     scope = current_scope()
+    payload = str(payload or "")
+
+    if re.fullmatch(r"-?\d+", payload):
+        chat_id = int(payload)
+        doc = await jdb.get_chat(chat_id, scope=scope)
+        if not doc or not doc.get("enabled"):
+            return await query.answer("Ye group ab controller mein nahi hai 🚫", show_alert=True)
+        session = await jdb.get_pending_session(user.id, chat_id, scope=scope)
+        if session is None:
+            if not _usable_required(doc.get("required")):
+                # Nothing to verify; keep the old button usable.
+                session = await jdb.create_session(user.id, chat_id, scope=scope)
+            else:
+                return await query.answer(
+                    "⏰ Ye verification expire ho gaya — group me dobara join request bhejo",
+                    show_alert=True,
+                )
+    else:
+        session = await jdb.get_session(payload, scope=scope)
+        if session is None:
+            return await query.answer(
+                "⏰ Verification session expire ho gaya — dobara join request bhejo",
+                show_alert=True,
+            )
+        chat_id = int(session.get("chat_id") or 0)
+
+    if int(session.get("user_id") or 0) != user.id:
+        return await query.answer("Ye verification kisi aur ke liye hai 🙃", show_alert=True)
+
+    status = session.get("status")
+    if status == "approved":
+        return await query.answer("✅ Aap already approved ho 🎉", show_alert=True)
+
     now = time.time()
+    if status == "expired" or float(session.get("expires_at") or 0) < now:
+        await jdb.set_session_status(session["session_id"], "expired")
+        await jdb.bump(chat_id, "expired", 1, scope=scope)
+        await _edit_card(
+            query,
+            "⏰ Verification session expire ho gaya.\n\n"
+            "Group me dobara join request bhejo, naya card aa jayega 🙂",
+        )
+        return await query.answer("⏰ Session expire ho gaya", show_alert=True)
+
     key = (chat_id, user.id)
     if now - _last_verify.get(key, 0) < VERIFY_TTL:
         return await query.answer("Thoda ruk jao, phir verify karo 🥺", show_alert=True)
+    if len(_last_verify) > 5000:  # keep the dict from growing forever
+        _last_verify.clear()
     _last_verify[key] = now
 
     doc = await jdb.get_chat(chat_id, scope=scope)
     if not doc or not doc.get("enabled"):
         return await query.answer("Is group ka request controller band hai 🚫", show_alert=True)
 
-    required = doc.get("required") or []
-    if not required:
-        missing = []
-    else:
-        missing = [
-            (entry.get("label") or entry.get("username") or "community")
-            for entry in required
-            if not await _member_ok(client, int(entry.get("chat_id") or 0), user.id)
-        ]
+    required = _usable_required(doc.get("required"))
+    attempts = await jdb.bump_attempt(session["session_id"])
 
-    title = _esc(doc.get("title") or "the group")
+    missing = []
+    for entry in required:
+        if not await _member_ok(client, entry, user.id):
+            missing.append(entry)
 
+    title = doc.get("title") or "the group"
+
+    # ── still missing something ──────────────────────────────────────────
     if missing:
-        joined = "\n".join(f"  ✗ {m}" for m in missing[:6])
-        await query.answer("Pehle ye join karo 😥", show_alert=True)
-        try:
-            await query.message.edit_text(
-                f"❌ **Abahi verify nahi hua.**\n\n"
-                f"Inhe join karo, phir wapas **VERIFY** dabao:\n{joined}",
-                reply_markup=build_verify_keyboard(chat_id, required),
-                disable_web_page_preview=True,
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        await jdb.bump(chat_id, "failed", 1, scope=scope)
+        lines = "\n".join(f"  ✗ {_button_label(entry)}" for entry in missing[:10])
+        await query.answer("❌ Abhi saari required chats join nahi ki 😥", show_alert=True)
+        await _edit_card(
+            query,
+            f"❌ Verification incomplete!\n\n"
+            f"Aapne ye join nahi kiya:\n{lines}\n\n"
+            f"Neeche ke buttons se join karo, phir VERIFY AGAIN dabao 🙂\n"
+            f"Attempt: {attempts}",
+            build_verify_keyboard(chat_id, missing, session["session_id"], missing=True),
+        )
         return
 
+    # ── everything joined ────────────────────────────────────────────────
     await jdb.bump(chat_id, "verified", 1, scope=scope)
+    await jdb.set_session_status(session["session_id"], "verified")
 
-    auto = await sdb.get_setting(sdb.KEY_JOINREQ_AUTO, scope=scope, default=True)
+    if session.get("is_test"):
+        await _edit_card(
+            query,
+            "🧪 TEST PASSED\n\n"
+            f"Saare required chats check ho gaye ✅\n"
+            f"(Ye test card tha, isliye koi join request approve nahi ki.)",
+        )
+        return await query.answer("✅ Test pass! Sab checks theek hain", show_alert=True)
+
+    auto = _flag(
+        doc.get("auto_approve"),
+        await sdb.get_setting(sdb.KEY_JOINREQ_AUTO, scope=scope, default=True),
+    )
+    notify = doc.get("notify_admins", True)
+
     if not auto:
-        try:
-            await query.message.edit_text(
-                "✅ **Verified!**\n\n"
-                "Ab koi admin aapki request approve kar dega — ruk jao 🥺",
-                disable_web_page_preview=True,
+        await _edit_card(
+            query,
+            "✅ Verified!\n\n"
+            f"Aapne {title} ke saare requirements complete kar liye.\n"
+            "Ab admin aapki request approve karega — thoda wait karo 🥺",
+        )
+        if notify:
+            await _notify_admins(
+                client,
+                "✅ USER VERIFIED (manual approve)",
+                f"👤 {user.first_name} ({_handle(user)})\n"
+                f"🏘 {doc.get('title') or chat_id}\n\n"
+                f"Auto-approve OFF hai — Telegram se request approve karo.",
             )
-        except Exception:  # noqa: BLE001
-            pass
-        await _notify_admins(client, chat_id, user, verified_only=True)
-        return
+        return await query.answer("✅ Verified! Admin approve karega", show_alert=True)
 
-    try:
-        await client.approve_chat_join_request(chat_id, user.id)
-    except ChatAdminRequired:
-        await query.answer("Bot ko group mein admin banao 🛠", show_alert=True)
-        await _notify_admins(client, chat_id, user, verified_only=True)
-        return
-    except RPCError as exc:  # noqa: BLE001
-        LOGGER.warning(f"joinreq approve failed for {chat_id}: {exc}")
-        await query.answer("Approve fail ho gaya, admin se baat karo 😥", show_alert=True)
-        return
+    if not await _approve(client, chat_id, user, scope=scope):
+        await _edit_card(
+            query,
+            "⚠️ Verify ho gaya, par approve nahi hua.\n\n"
+            "Bot ko group mein admin banao (Invite users + Manage chat), "
+            "phir dobara try karo.",
+        )
+        if notify:
+            await _notify_admins(
+                client,
+                "⚠️ APPROVE FAILED",
+                f"👤 {user.first_name} ({_handle(user)})\n"
+                f"🏘 {doc.get('title') or chat_id}\n\n"
+                f"Bot ke admin rights check karo.",
+            )
+        return await query.answer("Approve fail ho gaya 😥", show_alert=True)
 
     await jdb.bump(chat_id, "approved", 1, scope=scope)
-    try:
-        await query.message.edit_text(
-            f"🎉 **Ho gaya!** {title} mein aapki request approve ho gayi.\n"
-            f"Wapas jao aur enjoy karo ✨",
-            disable_web_page_preview=True,
-        )
-    except Exception:  # noqa: BLE001
-        pass
+    await jdb.set_session_status(session["session_id"], "approved")
 
+    await _edit_card(
+        query,
+        f"🎉 APPROVED!\n\n"
+        f"{title} mein aapki request approve ho gayi.\n"
+        f"Ab group kholo aur enjoy karo ✨",
+    )
+    await query.answer("🎉 Approved! Welcome", show_alert=True)
+
+    if notify:
+        await _notify_admins(
+            client,
+            "🎉 REQUEST APPROVED",
+            f"👤 {user.first_name} ({_handle(user)})\n"
+            f"🏘 {doc.get('title') or chat_id}\n\n"
+            f"Verification complete → auto-approved.",
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Admin panel helpers
+# ══════════════════════════════════════════════════════════════════════════
+async def diagnose(client, chat_id: int, user_id: int) -> str:
+    """Explain why VERIFY would/wouldn't work — straight from Telegram's view."""
+    doc = await jdb.get_chat(chat_id)
+    if not doc:
+        return "❌ Ye group managed list mein nahi hai."
+
+    lines = [f"🧪 CHECK — {doc.get('title') or chat_id}", ""]
+
+    # 1. bot rights in the target chat
+    try:
+        me = client.me
+        member = await client.get_chat_member(chat_id, me.id)
+        priv = getattr(member, "privileges", None)
+        if member.status != ChatMemberStatus.ADMINISTRATOR:
+            lines.append("❌ Bot is group mein admin NAHI hai")
+        elif not getattr(priv, "can_invite_users", False):
+            lines.append("❌ Bot admin hai par 'Invite users' permission OFF hai")
+        else:
+            lines.append("✅ Bot admin hai (invite users + manage chat)")
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"⚠️ Bot rights check fail: {type(exc).__name__}")
+
+    # 2. every required entry
+    required = doc.get("required") or []
+    usable = _usable_required(required)
+    if not required:
+        lines.append("ℹ️ Koi required chat nahi — auto-approve turant hoga")
+    for entry in required:
+        label = _button_label(entry)
+        try:
+            cid_int = int(entry.get("chat_id") or 0)
+        except Exception:  # noqa: BLE001
+            cid_int = 0
+        if entry not in usable:
+            lines.append(f"⚠️ {label} — skip (bot/user id, check nahi ho sakta)")
+            continue
+        try:
+            username = entry.get("username")
+            target = f"@{str(username).lstrip('@')}" if username else cid_int
+            chat = await client.get_chat(target)
+            bot_member = await client.get_chat_member(target, client.me.id)
+            ok_bot = bot_member.status not in (
+                ChatMemberStatus.LEFT,
+                ChatMemberStatus.BANNED,
+            )
+            joined = await _member_ok(client, entry, user_id)
+            mark = "✅" if joined else "❌"
+            note = "" if ok_bot else " (bot is chat mein nahi hai!)"
+            chat_username = getattr(chat, "username", None)
+            lines.append(
+                f"{mark} {label} — @{chat_username}"
+                if chat_username
+                else f"{mark} {label}{note}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            lines.append(f"❌ {label} — {type(exc).__name__} (id galat ya bot ko access nahi)")
+
+    lines.append("")
+    lines.append("ℹ️ Neeche wala card aapko DM mein bheja ja raha hai — usme VERIFY dabao.")
+    return "\n".join(lines)
+
+
+async def send_test_card(client, chat_id: int, user) -> bool:
+    """DM the admin a real verification card, marked as a test."""
+    user = _u(user)
+    doc = await jdb.get_chat(chat_id)
+    if not doc:
+        return False
+    required = _usable_required(doc.get("required"))
+    session = await jdb.create_session(user.id, chat_id, minutes=30, is_test=True)
+    text = await _fill(
+        doc.get("welcome")
+        or await sdb.get_setting(sdb.KEY_JOINREQ_WELCOME, default=None)
+        or DEFAULT_WELCOME,
+        name=user.first_name,
+        chat=doc.get("title") or "is group",
+        count=len(required),
+        first_name=user.first_name,
+        last_name=user.last_name,
+        username=user.username,
+        user_id=user.id,
+        chat_title=doc.get("title"),
+        chat_username=doc.get("username"),
+    )
+    text = "🧪 TEST CARD — ye sirf aapke liye hai, kisi ko approve nahi karega.\n\n" + text
     try:
         await client.send_message(
-            chat_id,
-            f"🚪 **Join approved** — [{_html.escape(user.first_name or 'user')}](tg://user?id={user.id})",
+            user.id,
+            text,
+            reply_markup=build_verify_keyboard(chat_id, required, session["session_id"]),
             disable_web_page_preview=True,
         )
-    except Exception:  # noqa: BLE001
-        pass
-
-
-async def _notify_admins(client, chat_id: int, user, verified_only: bool = False):
-    """Tell the group's admins about a verified (but unapproved) request."""
-    lines = (
-        "✅ **Verified user** — auto-approve OFF hai, approve kar do:"
-        if verified_only
-        else "🚪 **Join request**"
-    )
-    body = f"{lines}\n[{_html.escape(user.first_name or 'user')}](tg://user?id={user.id})"
-    try:
-        admins = await client.get_chat_members(chat_id, filter="administrators")
-        for member in admins:
-            if member.user and not member.user.is_bot:
-                try:
-                    await client.send_message(member.user.id, body, disable_web_page_preview=True)
-                except Exception:  # noqa: BLE001
-                    pass
-    except Exception:  # noqa: BLE001
-        pass
+        return True
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning(f"joinreq: test card failed for {user.id}: {exc}")
+        return False
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -415,6 +857,17 @@ async def resolve_invite(client, invite_hash: str):
     )
 
 
+async def invite_for(client, chat) -> str:
+    """Best-effort public join link for a required chat (used in the DM buttons)."""
+    username = getattr(chat, "username", None)
+    if username:
+        return f"https://t.me/{username}"
+    try:
+        return await client.export_chat_invite_link(chat.id)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 async def resolve_chat(client, text: str):
     """Turn a pasted `-100…` id, an `@username` or a `t.me/…` link into a chat.
 
@@ -459,23 +912,17 @@ async def resolve_chat(client, text: str):
     return chat, None
 
 
-async def invite_for(client, chat) -> str:
-    """Best-effort public join link for a required chat (used in the DM buttons)."""
-    username = getattr(chat, "username", None)
-    if username:
-        return f"https://t.me/{username}"
-    try:
-        return await client.export_chat_invite_link(chat.id)
-    except Exception:  # noqa: BLE001
-        return ""
-
-
 __all__ = [
     "DEFAULT_WELCOME",
+    "DEFAULT_TIMEOUT_MIN",
+    "COUNTERS",
+    "VERIFY_TTL",
+    "build_verify_keyboard",
     "on_join_request",
     "verify_and_approve",
+    "diagnose",
+    "send_test_card",
     "resolve_chat",
     "resolve_invite",
     "invite_for",
-    "build_verify_keyboard",
 ]

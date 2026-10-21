@@ -416,8 +416,14 @@ async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
     for chat in chats:
         req_total += len(chat.get("required") or [])
 
-    preview = (welcome or joinreq_service.DEFAULT_WELCOME)
-    preview = preview.replace("{name}", "**Naam**").replace("{chat}", "**Group**")
+    preview = await joinreq_service._fill(
+        welcome or joinreq_service.DEFAULT_WELCOME,
+        name="Naam",
+        chat="Group",
+        count=3,
+        first_name="Naam",
+        chat_title="Group",
+    )
     if len(preview) > 130:
         preview = preview[:130] + "…"
 
@@ -434,13 +440,15 @@ async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
         f"🏘 **Managed groups:** `{len(chats)}` · 🔗 required links `{req_total}`\n"
         f"📨 **Requests:** `{_jr_count(chats, 'pending')}`"
         f" · ✅ verified `{_jr_count(chats, 'verified')}`"
-        f" · 🚪 approved `{_jr_count(chats, 'approved')}`\n"
+        f" · 🚪 approved `{_jr_count(chats, 'approved')}`"
+        f" · ❌ failed `{_jr_count(chats, 'failed')}`\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "✨ **Welcome card:**\n"
         f"`{preview}`\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "ℹ️ Har managed group mein bot ko **admin** hona chahiye "
-        "(Invite users + Manage chat)."
+        "(Invite users + Manage chat). Setup ke baad us group ko kholo → "
+        "🧪 **Must-join Setup → 🧪 Test** se poora flow khud check kar lo."
     )
     rows = [
         [
@@ -505,13 +513,34 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         return "❌ Ye group ab managed list mein nahi hai.", InlineKeyboardMarkup([[_back("ad_jr_chats")]])
 
     required = chat.get("required") or []
+    usable = joinreq_service._usable_required(required)
+    skipped = len(required) - len(usable)
     title = chat.get("title") or str(chat_id)
     uname = f"@{chat['username']}" if chat.get("username") else ""
 
+    auto_doc = chat.get("auto_approve")
+    auto_global = await ai_settings.get_setting(ai_settings.KEY_JOINREQ_AUTO, default=True)
+    auto = auto_global if auto_doc is None else bool(auto_doc)
+    auto_src = "global" if auto_doc is None else "is group"
+    try:
+        timeout = int(chat.get("timeout_minutes") or jdb.DEFAULT_TIMEOUT_MIN)
+    except Exception:  # noqa: BLE001
+        timeout = jdb.DEFAULT_TIMEOUT_MIN
+    notify = chat.get("notify_admins", True)
+    welcome = chat.get("welcome")
+    counters = chat.get("counters") or {}
+
     lines = [
-        f"🧪 **MUST-JOIN LIST — {title}** {uname}",
+        f"🧪 **MUST-JOIN SETUP — {title}** {uname}",
         "━━━━━━━━━━━━━━━━━━━━━━",
-        "VERIFY dabne se pehle user ko ye sab join karna hoga.",
+        f"🤖 **Auto-approve:** {'✅ ON' if auto else '❌ OFF'} _{auto_src}_",
+        f"⏱ **Session timeout:** `{timeout} min`",
+        f"🔔 **Admin alerts:** {'✅ ON' if notify else '❌ OFF'}",
+        f"✨ **Welcome:** {'custom' if welcome else 'default'}",
+        f"📨 Requests: `{counters.get('pending', 0)}` · ✅ `{counters.get('verified', 0)}`"
+        f" · 🚪 `{counters.get('approved', 0)}` · ❌ `{counters.get('failed', 0)}`",
+        "",
+        "VERIFY dabne se pehle user ko ye sab join karna hoga:",
         "",
     ]
     if not required:
@@ -520,14 +549,38 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         for index, entry in enumerate(required, 1):
             label = entry.get("label") or entry.get("username") or str(entry.get("chat_id"))
             handle = f"@{entry['username']}" if entry.get("username") else "private"
-            lines.append(f"`{index}.` **{label}** — {handle}")
+            bad = " ⚠️" if entry not in usable else ""
+            lines.append(f"`{index}.` **{label}** — {handle}{bad}")
+    if skipped:
+        lines.append(
+            f"\n⚠️ `{skipped}` entry skip ho rahi hai (bot/user id — membership check "
+            f"nahi ho sakta). Woh hata do."
+        )
 
-    rows = [[InlineKeyboardButton("➕ Add Channel/Group", callback_data=f"ad_jr_radd:{chat_id}")]]
+    rows = [
+        [
+            InlineKeyboardButton(
+                f"🤖 Auto {'✅' if auto else '❌'}", callback_data=f"ad_jr_cauto:{chat_id}"
+            ),
+            InlineKeyboardButton(f"⏱ {timeout}m", callback_data=f"ad_jr_ctime:{chat_id}"),
+        ],
+        [
+            InlineKeyboardButton(
+                f"🔔 Alerts {'✅' if notify else '❌'}", callback_data=f"ad_jr_cnotify:{chat_id}"
+            ),
+            InlineKeyboardButton("✨ Welcome", callback_data=f"ad_jr_cwel:{chat_id}"),
+        ],
+        [InlineKeyboardButton("➕ Add Channel/Group", callback_data=f"ad_jr_radd:{chat_id}")],
+    ]
     for index, entry in enumerate(required):
         label = (entry.get("label") or entry.get("username") or str(entry.get("chat_id")))[:18]
+        prefix = "⚠️" if entry not in usable else "🗑"
         rows.append([
-            InlineKeyboardButton(f"🗑 {label}", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
+            InlineKeyboardButton(f"{prefix} {label}", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
         ])
+    rows.append([
+        InlineKeyboardButton("🧪 Test (DM card)", callback_data=f"ad_jr_test:{chat_id}"),
+    ])
     rows.append([_back("ad_jr_chats")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
@@ -842,10 +895,13 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         pending_input[user_id] = {"kind": "jr_welcome"}
         try:
             await query.message.edit_text(
-                "✨ **Welcome message**\n\n"
+                "✨ **Welcome message (global default)**\n\n"
                 "DM me jo card jaayega wo text bhejo.\n"
-                "Placeholders: `{name}` · `{chat}` · `{count}`\n\n"
+                "Placeholders: `{first_name}` · `{chat_title}` · `{username}` · "
+                "`{user_id}` · `{chat_username}` · `{count}`\n"
+                "(purane `{name}` · `{chat}` bhi chalte hain)\n\n"
                 "Default text wapas laane ke liye bhejo `default`.\n"
+                "Kisi ek group ke liye alag text: Must-join Setup → ✨ Welcome.\n"
                 "`/cancel` se cancel kar sakte ho.",
                 reply_markup=InlineKeyboardMarkup([[_back("ad_jr")]]),
             )
@@ -881,6 +937,7 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         except Exception:  # noqa: BLE001
             return await query.answer("❌ Galat group id.", show_alert=True)
         await jdb.remove(chat_id)
+        await jdb.purge_sessions(chat_id)
         await show(await _jr_chats_panel(), "🗑 Group hata diya")
         return
 
@@ -890,6 +947,106 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         except Exception:  # noqa: BLE001
             return await query.answer("❌ Galat group id.", show_alert=True)
         await show(await _jr_req_panel(chat_id))
+        return
+
+    # ── per-chat settings ─────────────────────────────────────────────────
+    if data.startswith("ad_jr_cauto:"):
+        try:
+            chat_id = int(data.split(":", 1)[1])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat group id.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        current = doc.get("auto_approve")
+        # global (None) → ON → OFF → global
+        new_value = {None: True, True: False, False: None}.get(current, True)
+        await jdb.set_option(chat_id, "auto_approve", new_value)
+        label = "global default" if new_value is None else ("ON" if new_value else "OFF")
+        await show(await _jr_req_panel(chat_id), f"🤖 Auto-approve: {label}")
+        return
+
+    if data.startswith("ad_jr_ctime:"):
+        try:
+            chat_id = int(data.split(":", 1)[1])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat group id.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        try:
+            current = int(doc.get("timeout_minutes") or jdb.DEFAULT_TIMEOUT_MIN)
+        except Exception:  # noqa: BLE001
+            current = jdb.DEFAULT_TIMEOUT_MIN
+        choices = jdb.TIMEOUT_CHOICES
+        try:
+            new_value = choices[(choices.index(current) + 1) % len(choices)]
+        except ValueError:
+            new_value = jdb.DEFAULT_TIMEOUT_MIN
+        await jdb.set_option(chat_id, "timeout_minutes", new_value)
+        await show(await _jr_req_panel(chat_id), f"⏱ Timeout: {new_value} min")
+        return
+
+    if data.startswith("ad_jr_cnotify:"):
+        try:
+            chat_id = int(data.split(":", 1)[1])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat group id.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        new_value = not bool(doc.get("notify_admins", True))
+        await jdb.set_option(chat_id, "notify_admins", new_value)
+        await show(await _jr_req_panel(chat_id), "🔔 Admin alerts ON" if new_value else "🔕 Admin alerts OFF")
+        return
+
+    if data.startswith("ad_jr_cwel:"):
+        try:
+            chat_id = int(data.split(":", 1)[1])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat group id.", show_alert=True)
+        pending_input[user_id] = {"kind": "jr_welcome_chat", "chat_id": chat_id}
+        try:
+            await query.message.edit_text(
+                "✨ **Welcome message — sirf is group ke liye**\n\n"
+                "DM me jo card jaayega wo text bhejo.\n"
+                "Placeholders: `{first_name}` · `{chat_title}` · `{username}` · "
+                "`{user_id}` · `{chat_username}`\n"
+                "(purane `{name}` · `{chat}` · `{count}` bhi chalte hain)\n\n"
+                "`default` bhejo to is group ka custom text hata kar global/default "
+                "wapas lagega.\n"
+                "`/cancel` se cancel kar sakte ho.",
+                reply_markup=InlineKeyboardMarkup([[_back(f"ad_jr_set:{chat_id}")]]),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        await query.answer()
+        return
+
+    if data.startswith("ad_jr_test:"):
+        try:
+            chat_id = int(data.split(":", 1)[1])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat group id.", show_alert=True)
+        try:
+            report = await joinreq_service.diagnose(client, chat_id, user_id)
+        except Exception as exc:  # noqa: BLE001
+            report = f"❌ Diagnose fail: {type(exc).__name__}: {exc}"
+        sent = False
+        try:
+            sent = await joinreq_service.send_test_card(client, chat_id, query.from_user)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning(f"joinreq test card failed: {exc}")
+        try:
+            await query.message.reply_text(report)
+        except Exception:  # noqa: BLE001
+            pass
+        await query.answer(
+            "🧪 Report bhej di + test card DM mein aaya"
+            if sent
+            else "🧪 Report bhej di (test card DM nahi gaya)",
+            show_alert=True,
+        )
         return
 
     if data.startswith("ad_jr_radd:"):
@@ -918,11 +1075,11 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         return
 
     if data.startswith("ad_jr_rdel:"):
-        parts = data.split(":")
-        if len(parts) != 4:
+        parts = data.split(":", 2)
+        if len(parts) != 3:
             return await query.answer("❌ Galat data.", show_alert=True)
         try:
-            chat_id, index = int(parts[2]), int(parts[3])
+            chat_id, index = int(parts[1]), int(parts[2])
         except Exception:  # noqa: BLE001
             return await query.answer("❌ Galat data.", show_alert=True)
         doc = await jdb.get_chat(chat_id)
@@ -1389,14 +1546,28 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
             pending_input.pop(user_id, None)
             await message.reply_text(f"❌ Max {jdb.MAX_REQUIRED} required links ho sakte hain.")
             return True
+        if int(chat.id) >= 0:
+            # A positive id can only be a user/bot; membership can't be checked.
+            await message.reply_text(
+                "❌ Ye ek bot/user account hai — sirf channel ya group add karo."
+            )
+            return True
+        if any(int(entry.get("chat_id") or 0) == int(chat.id) for entry in required):
+            await message.reply_text("❌ Ye chat pehle se required list mein hai.")
+            return True
+        label = (
+            getattr(chat, "title", None)
+            or getattr(chat, "username", None)
+            or str(chat.id)
+        )
         required.append({
             "chat_id": int(chat.id),
-            "username": chat.username,
-            "label": (chat.title or chat.username or str(chat.id))[:60],
+            "username": getattr(chat, "username", None),
+            "label": label[:60],
             "invite": await joinreq_service.invite_for(message._client, chat),
         })
         await jdb.set_required(chat_id, required)
-        label = (chat.title or chat.username or str(chat.id))[:40]
+        label = label[:40]
         await message.reply_text(
             f"➕ **{label}** add ho gaya — ab user ko VERIFY se pehle "
             f"ye join karna hoga.",
@@ -1416,6 +1587,28 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
         await message.reply_text(
             "✨ Welcome message set ho gaya.",
             reply_markup=(await _jr_panel())[1],
+        )
+        return True
+
+    if kind == "jr_welcome_chat":
+        chat_id = flow.get("chat_id")
+        pending_input.pop(user_id, None)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            await message.reply_text("❌ Wo group ab managed list mein nahi hai.")
+            return True
+        if text.lower() in ("default", "reset", "clear"):
+            await jdb.set_option(chat_id, "welcome", None)
+            note = "✨ Is group ka custom text hata diya (global/default lagega)."
+        elif len(text) > 900:
+            await message.reply_text("❌ Bahut lamba hai — 900 char tak allowed hain.")
+            return True
+        else:
+            await jdb.set_option(chat_id, "welcome", text)
+            note = "✨ Is group ka welcome message set ho gaya."
+        await message.reply_text(
+            note,
+            reply_markup=(await _jr_req_panel(chat_id))[1],
         )
         return True
 
