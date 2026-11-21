@@ -541,12 +541,13 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     verify_style = chat.get("verify_style", "primary")
 
     style_names = {
-        "primary": "🔵 Primary",
-        "success": "🟢 Success",
-        "danger": "🔴 Danger",
-        "default": "⚪ Default",
+        "primary": "Primary",
+        "secondary": "Secondary",
+        "success": "Secondary",
+        "danger": "Danger",
+        "default": "Default",
     }
-    v_style_badge = style_names.get(verify_style, "🔵 Primary")
+    v_style_badge = style_names.get(verify_style, "Primary")
 
     lines = [
         f"🧪 **MUST-JOIN SETUP — {title}** {uname}",
@@ -569,7 +570,7 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         for index, entry in enumerate(required, 1):
             label = entry.get("label") or entry.get("username") or str(entry.get("chat_id"))
             entry_style = entry.get("style", "default")
-            s_tag = style_names.get(entry_style, "⚪ Default")
+            s_tag = style_names.get(entry_style, "Default")
             if joinreq_service._is_manual(entry):
                 url_preview = (entry.get("invite") or "")[:28]
                 lines.append(f"`{index}.` **{label}** [{s_tag}] — 🖐 `{url_preview}`")
@@ -613,26 +614,20 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton(
-                f"🎨 VERIFY Button: {v_style_badge}", callback_data=f"ad_jr_vstyle:{chat_id}"
+                f"🎨 VERIFY Style: {v_style_badge}", callback_data=f"ad_jr_vstyle:{chat_id}"
             ),
         ],
     ]
-    style_short = {
-        "primary": "🔵",
-        "success": "🟢",
-        "danger": "🔴",
-        "default": "⚪",
-    }
     for index, entry in enumerate(required):
         label = (entry.get("label") or entry.get("username") or str(entry.get("chat_id")))[:14]
         entry_style = entry.get("style", "default")
-        s_icon = style_short.get(entry_style, "⚪")
+        s_name = style_names.get(entry_style, "Default")
         rows.append([
             InlineKeyboardButton(
                 f"✏️ {label}", callback_data=f"ad_jr_rlabel:{chat_id}:{index}"
             ),
             InlineKeyboardButton("🔗 Link", callback_data=f"ad_jr_rlink:{chat_id}:{index}"),
-            InlineKeyboardButton(f"🎨 {s_icon}", callback_data=f"ad_jr_rstyle:{chat_id}:{index}"),
+            InlineKeyboardButton(f"🎨 {s_name}", callback_data=f"ad_jr_rstyle:{chat_id}:{index}"),
             InlineKeyboardButton("🗑", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
         ])
     rows.append([
@@ -1298,7 +1293,7 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
             return await query.answer("❌ Ye entry nahi mili.", show_alert=True)
         entry = dict(required[index])
         current_style = entry.get("style", "default")
-        cycle = ["default", "primary", "success", "danger"]
+        cycle = ["default", "primary", "secondary", "danger"]
         try:
             idx = cycle.index(current_style)
         except ValueError:
@@ -1307,8 +1302,8 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         entry["style"] = new_style
         required[index] = entry
         await jdb.set_required(chat_id, required)
-        style_names = {"primary": "🔵 Primary", "success": "🟢 Success", "danger": "🔴 Danger", "default": "⚪ Default"}
-        await show(await _jr_req_panel(chat_id), f"🎨 Style: {style_names.get(new_style)}")
+        style_names = {"primary": "Primary", "secondary": "Secondary", "danger": "Danger", "default": "Default"}
+        await show(await _jr_req_panel(chat_id), f"Style: {style_names.get(new_style, 'Default')}")
         return
 
     if data.startswith("ad_jr_vstyle:"):
@@ -1320,15 +1315,15 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         if not doc:
             return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
         current_vstyle = doc.get("verify_style", "primary")
-        cycle = ["primary", "success", "danger", "default"]
+        cycle = ["primary", "secondary", "danger", "default"]
         try:
             idx = cycle.index(current_vstyle)
         except ValueError:
             idx = 0
         new_vstyle = cycle[(idx + 1) % len(cycle)]
         await jdb.set_option(chat_id, "verify_style", new_vstyle)
-        style_names = {"primary": "🔵 Primary", "success": "🟢 Success", "danger": "🔴 Danger", "default": "⚪ Default"}
-        await show(await _jr_req_panel(chat_id), f"🎨 VERIFY Style: {style_names.get(new_vstyle)}")
+        style_names = {"primary": "Primary", "secondary": "Secondary", "danger": "Danger", "default": "Default"}
+        await show(await _jr_req_panel(chat_id), f"VERIFY Style: {style_names.get(new_vstyle, 'Primary')}")
         return
 
     # ── clones ─────────────────────────────────────────────────────────────
