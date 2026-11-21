@@ -2,11 +2,15 @@
 Broadcast commands.
 
 ``/broadcast`` (or ``/bc``) opens the full inline panel (see
-``Myra/modules/admin_panel.py``) — choose sender (main bot / all userbots /
-one userbot) and target (groups only / DMs only / both).
+``Myra/modules/admin_panel.py``) — choose sender (current bot / all cloned bots /
+all bots / all userbots / one userbot) and target (groups only / DMs only / both).
 
 ``/br`` is the quick version: reply to any message and it is broadcast from the
-**main bot** to every group **and** every DM user.
+**current bot** (main bot or clone) to its groups and DMs.
+
+``/cbr`` (or ``/clonesbroadcast``) broadcasts across **all cloned bots** simultaneously.
+
+``/allbr`` (or ``/allbroadcast``) broadcasts across **main bot + all cloned bots** simultaneously.
 
 ``/an`` forwards a post to all groups and users.
 """
@@ -23,10 +27,10 @@ from pyrogram.errors import (
 )
 from pyrogram.types import Message
 
-from Myra import Myra
+from Myra import Myra, config
 from Myra.database import get_chats, get_users
 from Myra.database.admins import is_admin
-from Myra.database.scope import global_scope
+from Myra.database.scope import clone_scope, global_scope
 from Myra.services.broadcast import content_from_message, describe, run_broadcast
 
 
@@ -49,16 +53,23 @@ async def send_msg(user_id, message):
 
 @Myra.on_cmd(["br", "gcast"])
 @global_scope
-async def broadcast(_, message: Message):
-    """Quick broadcast from the main bot to all groups + all DM users."""
+async def broadcast(client: Client, message: Message):
+    """Quick broadcast from this bot to all groups + all DM users."""
     if not (await is_admin(message.from_user.id)):
         return await message.reply_text("😏 **ʏσυ ¢αη'τ υѕє τнιѕ ¢σммαη∂**")
 
     if not message.reply_to_message:
         return await message.reply_text(
             "ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴛᴏ ʙʀᴏᴀᴅᴄᴀsᴛ ɪᴛ.\n\n"
-            "ℹ️ More options (per-userbot / groups-only / DM-only) → `/broadcast`"
+            "ℹ️ **More options:**\n"
+            "• `/cbr` → broadcast to all cloned bots\n"
+            "• `/allbr` → broadcast to main bot + all cloned bots\n"
+            "• `/broadcast` → full interactive control panel"
         )
+
+    scope = None
+    if getattr(client, "id", None) and client.id != config.BOT_ID:
+        scope = clone_scope(client.id)
 
     exmsg = await message.reply_text("📢 sᴛᴀʀᴛᴇᴅ ʙʀᴏᴀᴅᴄᴀsᴛɪɴɢ!")
 
@@ -69,9 +80,79 @@ async def broadcast(_, message: Message):
             pass
 
     stats = await run_broadcast(
-        "bot", content_from_message(message.reply_to_message), "both", progress=progress
+        "bot", content_from_message(message.reply_to_message), "both", progress=progress, scope=scope
     )
     await exmsg.edit_text(describe("bot", "both", stats))
+
+
+@Myra.on_cmd(["cbr", "clonesbroadcast", "cbg"])
+@global_scope
+async def broadcast_clones(client: Client, message: Message):
+    """Quick broadcast from all cloned bots to their served groups and/or DM users."""
+    if not (await is_admin(message.from_user.id)):
+        return await message.reply_text("😏 **ʏσυ ¢αη'τ υѕє τнιѕ ¢σммαη∂**")
+
+    if not message.reply_to_message:
+        return await message.reply_text(
+            "ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴛᴏ ʙʀᴏᴀᴅᴄᴀsᴛ ɪᴛ ᴛᴏ ᴀʟʟ ᴄʟᴏɴᴇᴅ ʙᴏᴛs.\n\n"
+            "Usage: `/cbr` (reply to message) or `/cbr groups` / `/cbr dm` / `/cbr both`\n"
+            "ℹ️ Full control panel → `/broadcast`"
+        )
+
+    target = "both"
+    args = (message.text or "").split()[1:] if message.text else []
+    if args and args[0].lower() in ("groups", "group", "grp", "g"):
+        target = "groups"
+    elif args and args[0].lower() in ("dm", "dms", "private", "user", "users", "u"):
+        target = "dm"
+
+    exmsg = await message.reply_text("📢 sᴛᴀʀᴛɪɴɢ ʙʀᴏᴀᴅᴄᴀsᴛ ᴛᴏ ᴀʟʟ ᴄʟᴏɴᴇᴅ ʙᴏᴛs...")
+
+    async def progress(stats):
+        try:
+            await exmsg.edit_text(describe("all_clones", target, stats))
+        except Exception:  # noqa: BLE001
+            pass
+
+    stats = await run_broadcast(
+        "all_clones", content_from_message(message.reply_to_message), target, progress=progress
+    )
+    await exmsg.edit_text(describe("all_clones", target, stats))
+
+
+@Myra.on_cmd(["allbr", "allbroadcast"])
+@global_scope
+async def broadcast_all_bots(client: Client, message: Message):
+    """Quick broadcast from Main bot + ALL cloned bots to their groups and/or DM users."""
+    if not (await is_admin(message.from_user.id)):
+        return await message.reply_text("😏 **ʏσυ ¢αη'τ υѕє τнιѕ ¢σммαη∂**")
+
+    if not message.reply_to_message:
+        return await message.reply_text(
+            "ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴛᴏ ʙʀᴏᴀᴅᴄᴀsᴛ ɪᴛ ᴛᴏ ᴍᴀɪɴ ʙᴏᴛ + ᴀʟʟ ᴄʟᴏɴᴇᴅ ʙᴏᴛs.\n\n"
+            "Usage: `/allbr` (reply to message) or `/allbr groups` / `/allbr dm` / `/allbr both`\n"
+            "ℹ️ Full control panel → `/broadcast`"
+        )
+
+    target = "both"
+    args = (message.text or "").split()[1:] if message.text else []
+    if args and args[0].lower() in ("groups", "group", "grp", "g"):
+        target = "groups"
+    elif args and args[0].lower() in ("dm", "dms", "private", "user", "users", "u"):
+        target = "dm"
+
+    exmsg = await message.reply_text("📢 sᴛᴀʀᴛɪɴɢ ʙʀᴏᴀᴅᴄᴀsᴛ ᴛᴏ ᴀʟʟ ʙᴏᴛs (ᴍᴀɪɴ + ᴄʟᴏɴᴇs)...")
+
+    async def progress(stats):
+        try:
+            await exmsg.edit_text(describe("all_bots", target, stats))
+        except Exception:  # noqa: BLE001
+            pass
+
+    stats = await run_broadcast(
+        "all_bots", content_from_message(message.reply_to_message), target, progress=progress
+    )
+    await exmsg.edit_text(describe("all_bots", target, stats))
 
 
 @Myra.on_cmd("an")

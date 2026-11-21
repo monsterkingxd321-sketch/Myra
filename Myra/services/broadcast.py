@@ -24,8 +24,8 @@ from pyrogram.errors import (
 
 from Myra import LOGGER
 from Myra.ai.audience import own_account_ids
-from Myra.database.chats import get_chats
-from Myra.database.users import get_users
+from Myra.database.chats import get_chats, get_exact_chats
+from Myra.database.users import get_users, get_exact_users
 
 DIALOG_CACHE_TTL = 30 * 60  # 30 minutes
 _DIALOG_CACHE: dict = {}
@@ -112,8 +112,8 @@ def content_from_text(text: str) -> Content:
 
 async def prepare_userbot_content(content: Content) -> Content:
     """
-    User accounts cannot reuse a bot's ``file_id``, so media is downloaded once
-    and re-uploaded from disk afterwards.
+    User accounts and cross-bot clones cannot reuse another bot's ``file_id``,
+    so media is downloaded once and re-uploaded from disk afterwards.
     """
     if content.kind == "text" or content.message is None or content.file_path:
         return content
@@ -131,19 +131,27 @@ async def prepare_userbot_content(content: Content) -> Content:
     return content
 
 
+prepare_broadcast_content = prepare_userbot_content
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Targets
 # ══════════════════════════════════════════════════════════════════════════
-async def bot_targets(kind: str, scope: str = None) -> list:
+async def bot_targets(kind: str, scope: str = None, exact: bool = False) -> list:
     """
     ``kind`` is "groups" or "dm".
 
     Groups come from the served-chats collection, DMs from the served users —
-    both of the bot in ``scope``.
+    both of the bot in ``scope``. If ``exact=True``, only chats specifically
+    served by ``scope`` are returned.
     """
     if kind == "groups":
+        if exact:
+            return await get_exact_chats(scope)
         return await get_chats(scope)
     if kind == "dm":
+        if exact:
+            return await get_exact_users(scope)
         return await get_users(scope)
     return []
 
@@ -209,7 +217,7 @@ async def userbot_targets(client: Client, account_id: str, kind: str, force: boo
 async def _send_one(client: Client, chat_id: int, content: Content, is_bot: bool) -> tuple[bool, str]:
     """Send to a single chat. Returns (ok, reason)."""
     try:
-        if is_bot and content.message is not None:
+        if is_bot and content.message is not None and getattr(content.message, "_client", None) == client:
             await content.message.copy(chat_id=chat_id)
             return True, ""
 
@@ -374,6 +382,134 @@ async def broadcast_userbots(
     return await _run(label, senders, targets, prepared, USERBOT_SLEEP, progress, cancel)
 
 
+async def broadcast_all_clones(
+    content: Content,
+    target: str,
+    progress=None,
+    cancel=None,
+    include_main: bool = False,
+) -> dict:
+    """
+    Broadcast across all running cloned bots (and optionally the main bot).
+    Each clone sends to its own served chats and/or served users.
+    """
+    from Myra import Myra as main_bot
+    from Myra.database.bots import bot_info
+    from Myra.database.scope import MAIN_SCOPE
+    from Myra.services.clones import CLIENTS, bot_client_for
+
+    active_scopes = []
+    if include_main and main_bot is not None:
+        active_scopes.append(MAIN_SCOPE)
+
+    for scope, client in CLIENTS.items():
+        if client is not None and getattr(client, "is_connected", True):
+            active_scopes.append(scope)
+
+    if not active_scopes:
+        return {
+            "sender": "all_bots" if include_main else "all_clones",
+            "total": 0,
+            "sent": 0,
+            "failed": 0,
+            "cancelled": False,
+            "reasons": {},
+            "bots_detail": {},
+        }
+
+    prepared = await prepare_userbot_content(content)
+
+    bot_entries = []
+    seen_chat_ids = set()
+    total_targets = 0
+
+    for scope in active_scopes:
+        client = bot_client_for(scope)
+        if client is None:
+            continue
+
+        binfo = bot_info(scope)
+        bot_username = binfo.get("username") or getattr(client, "username", None)
+        bot_label = f"@{bot_username}" if bot_username else (binfo.get("name") or getattr(client, "name", None) or scope)
+
+        targets = []
+        if target in ("groups", "both"):
+            targets += await bot_targets("groups", scope, exact=True)
+        if target in ("dm", "both"):
+            targets += await bot_targets("dm", scope, exact=True)
+
+        clean_targets = []
+        for cid in dict.fromkeys(targets):
+            if cid not in seen_chat_ids:
+                seen_chat_ids.add(cid)
+                clean_targets.append(cid)
+
+        bot_entries.append({
+            "scope": scope,
+            "client": client,
+            "label": bot_label,
+            "targets": clean_targets,
+        })
+        total_targets += len(clean_targets)
+
+    stats = {
+        "sender": "all_bots" if include_main else "all_clones",
+        "total": total_targets,
+        "sent": 0,
+        "failed": 0,
+        "cancelled": False,
+        "reasons": {},
+        "bots_detail": {
+            entry["label"]: {"sent": 0, "failed": 0, "total": len(entry["targets"])}
+            for entry in bot_entries
+        },
+    }
+
+    if total_targets == 0:
+        return stats
+
+    last_progress_time = 0.0
+
+    async def maybe_progress():
+        nonlocal last_progress_time
+        now = time.time()
+        if progress is not None and (now - last_progress_time >= 1.5):
+            last_progress_time = now
+            try:
+                await progress(stats)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def bot_worker(entry: dict):
+        client = entry["client"]
+        label = entry["label"]
+        for chat_id in entry["targets"]:
+            if cancel is not None and cancel.get("stop"):
+                stats["cancelled"] = True
+                break
+            ok, reason = await _send_one(client, chat_id, prepared, is_bot=True)
+            if ok:
+                stats["sent"] += 1
+                stats["bots_detail"][label]["sent"] += 1
+            else:
+                stats["failed"] += 1
+                stats["bots_detail"][label]["failed"] += 1
+                stats["reasons"][reason] = stats["reasons"].get(reason, 0) + 1
+
+            await maybe_progress()
+            await asyncio.sleep(BOT_SLEEP)
+
+    await asyncio.gather(*[bot_worker(entry) for entry in bot_entries])
+
+    if progress is not None:
+        try:
+            await progress(stats)
+        except Exception:  # noqa: BLE001
+            pass
+
+    return stats
+
+
 async def run_broadcast(
     sender: str,
     content: Content,
@@ -383,11 +519,15 @@ async def run_broadcast(
     scope: str = None,
 ) -> dict:
     """
-    ``sender`` = "bot", "userbots" (all), or a specific ``account_id``.
+    ``sender`` = "bot", "all_clones", "all_bots", "userbots" (all), or a specific ``account_id``.
     ``target`` = "groups" | "dm" | "both".
     """
     if sender == "bot":
         return await broadcast_bot(content, target, progress, cancel, scope)
+    if sender in ("all_clones", "clones"):
+        return await broadcast_all_clones(content, target, progress, cancel, include_main=False)
+    if sender in ("all_bots", "main_and_clones"):
+        return await broadcast_all_clones(content, target, progress, cancel, include_main=True)
     if sender in ("userbots", "all"):
         return await broadcast_userbots(content, target, None, progress, cancel, scope)
     return await broadcast_userbots(content, target, [sender], progress, cancel, scope)
@@ -403,6 +543,10 @@ def describe(
     """Human readable broadcast report."""
     if sender == "bot":
         sender_label = "🤖 Main Bot"
+    elif sender in ("all_clones", "clones"):
+        sender_label = "🌐 All Cloned Bots"
+    elif sender in ("all_bots", "main_and_clones"):
+        sender_label = "🚀 All Bots (Main + Clones)"
     elif sender in ("userbots", "all"):
         sender_label = "👥 All Userbots"
     else:
@@ -427,6 +571,17 @@ def describe(
     if seconds:
         lines.append(f"⏱ **Time:** `{seconds:.1f}s`")
 
+    bots_detail = stats.get("bots_detail") or {}
+    if bots_detail:
+        lines.append("")
+        lines.append("**Per-bot details:**")
+        for blabel, bstats in bots_detail.items():
+            sent = bstats.get("sent", 0)
+            total = bstats.get("total", 0)
+            failed = bstats.get("failed", 0)
+            fail_str = f" · ❌ `{failed}`" if failed else ""
+            lines.append(f"• `{blabel}` → `{sent}/{total}` sent{fail_str}")
+
     reasons = stats.get("reasons") or {}
     if reasons:
         top = sorted(reasons.items(), key=lambda item: -item[1])[:6]
@@ -443,11 +598,13 @@ __all__ = [
     "content_from_message",
     "content_from_text",
     "prepare_userbot_content",
+    "prepare_broadcast_content",
     "bot_targets",
     "userbot_targets",
     "userbot_dialogs",
     "broadcast_bot",
     "broadcast_userbots",
+    "broadcast_all_clones",
     "run_broadcast",
     "describe",
 ]

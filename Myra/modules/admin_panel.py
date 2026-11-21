@@ -201,9 +201,21 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
 
 
 async def _broadcast_sender_panel() -> tuple[str, InlineKeyboardMarkup]:
+    from Myra.services.clones import CLIENTS
     accounts = _my_accounts()
     bot_name = bot_info().get("name") or "Main Bot"
+    clones_count = len([c for c in CLIENTS.values() if c is not None])
+
     rows = [[InlineKeyboardButton(f"🤖 {bot_name}", callback_data="ad_bc_s:bot")]]
+
+    if clones_count > 0:
+        rows.append([
+            InlineKeyboardButton(f"🌐 All Cloned Bots ({clones_count})", callback_data="ad_bc_s:all_clones"),
+            InlineKeyboardButton(f"🚀 All Bots ({clones_count + 1})", callback_data="ad_bc_s:all_bots"),
+        ])
+    else:
+        rows.append([InlineKeyboardButton("🌐 All Cloned Bots (0 active)", callback_data="ad_noop")])
+
     if accounts:
         rows.append([InlineKeyboardButton("👥 All Userbots", callback_data="ad_bc_s:userbots")])
         for account_id, data in list(accounts.items())[:12]:
@@ -220,7 +232,9 @@ async def _broadcast_sender_panel() -> tuple[str, InlineKeyboardMarkup]:
         "📢 **BROADCAST — STEP 1/3**\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "**Kis se bhejna hai?** Choose the sender:\n\n"
-        "🤖 **Main Bot** — bot ke naam se\n"
+        f"🤖 **{bot_name}** — current bot ke naam se\n"
+        f"🌐 **All Cloned Bots** — sabhi active cloned bots ek sath\n"
+        f"🚀 **All Bots** — main bot aur sabhi cloned bots ek sath\n"
         "👥 **All Userbots** — sabhi connected userbot mil kar "
         "(targets round-robin me bat jaate hain)\n"
         "👤 **Single Userbot** — sirf usi account se\n"
@@ -232,6 +246,10 @@ async def _broadcast_sender_panel() -> tuple[str, InlineKeyboardMarkup]:
 async def _broadcast_target_panel(sender: str) -> tuple[str, InlineKeyboardMarkup]:
     if sender == "bot":
         label = f"🤖 {bot_info().get('name') or 'Main Bot'}"
+    elif sender in ("all_clones", "clones"):
+        label = "🌐 All Cloned Bots"
+    elif sender in ("all_bots", "main_and_clones"):
+        label = "🚀 All Bots (Main + Clones)"
     elif sender == "userbots":
         label = "👥 All Userbots"
     else:
@@ -259,10 +277,17 @@ async def _broadcast_target_panel(sender: str) -> tuple[str, InlineKeyboardMarku
 
 def _broadcast_prompt(sender: str, target: str) -> tuple[str, InlineKeyboardMarkup]:
     label = {"groups": "💬 Groups only", "dm": "✉️ DMs only", "both": "🌐 Groups + DMs"}[target]
+    sender_labels = {
+        "bot": f"🤖 {bot_info().get('name') or 'Main Bot'}",
+        "all_clones": "🌐 All Cloned Bots",
+        "all_bots": "🚀 All Bots (Main + Clones)",
+        "userbots": "👥 All Userbots",
+    }
+    sender_display = sender_labels.get(sender, f"👤 {sender}")
     text = (
         "📢 **BROADCAST — STEP 3/3**\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📤 **Sender:** `{sender}`\n"
+        f"📤 **Sender:** {sender_display}\n"
         f"🎯 **Target:** {label}\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "**Ab message bhejo** — jo text bhejoge wahi broadcast hoga.\n\n"

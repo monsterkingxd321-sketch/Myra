@@ -49,6 +49,24 @@ async def get_users(scope: str = None) -> list:
     return user_list
 
 
+async def get_exact_users(scope: str = None) -> list:
+    """Exact DM users served by this bot scope (does not bleed across bots)."""
+    if usersdb is None:
+        return []
+    from Myra.database.scope import MAIN_SCOPE, current_scope
+
+    scope = scope or current_scope()
+    if scope == MAIN_SCOPE:
+        query = {"user_id": {"$gt": 0}, "$or": [{"scope": MAIN_SCOPE}, {"scope": {"$exists": False}}]}
+    else:
+        query = {"user_id": {"$gt": 0}, "scope": scope}
+
+    user_list = []
+    async for user in usersdb.find(query):
+        user_list.append(user["user_id"])
+    return user_list
+
+
 async def get_user(user_id: int, scope: str = None) -> bool:
     return await is_served_user(user_id, scope)
 
@@ -68,6 +86,7 @@ __all__ = [
     "add_served_user",
     "remove_served_user",
     "get_users",
+    "get_exact_users",
     "get_user",
     "add_user",
     "del_user",

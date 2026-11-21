@@ -50,6 +50,24 @@ async def get_chats(scope: str = None) -> list:
     return chats_list
 
 
+async def get_exact_chats(scope: str = None) -> list:
+    """Exact chats served by this bot scope (does not bleed across bots)."""
+    if chatsdb is None:
+        return []
+    from Myra.database.scope import MAIN_SCOPE, current_scope
+
+    scope = scope or current_scope()
+    if scope == MAIN_SCOPE:
+        query = {"chat_id": {"$lt": 0}, "$or": [{"scope": MAIN_SCOPE}, {"scope": {"$exists": False}}]}
+    else:
+        query = {"chat_id": {"$lt": 0}, "scope": scope}
+
+    chats_list = []
+    async for chat in chatsdb.find(query):
+        chats_list.append(chat["chat_id"])
+    return chats_list
+
+
 async def get_chat(chat_id: int, scope: str = None) -> bool:
     return await is_served_chat(chat_id, scope)
 
@@ -69,6 +87,7 @@ __all__ = [
     "add_served_chat",
     "remove_served_chat",
     "get_chats",
+    "get_exact_chats",
     "get_chat",
     "add_chat",
     "del_chat",
