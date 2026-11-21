@@ -25,6 +25,7 @@ import re
 import time
 from types import SimpleNamespace
 
+from pyrogram import enums
 from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.errors import (
     BadRequest,
@@ -214,29 +215,50 @@ def _button_label(entry) -> str:
     )[:40]
 
 
+def button_style_from_str(style_str: str):
+    """Map string style to Kurigram / Telegram Bot API ButtonStyle enum."""
+    if not style_str:
+        return getattr(enums.ButtonStyle, "DEFAULT", None)
+    s = str(style_str).lower().strip()
+    if s == "primary":
+        return getattr(enums.ButtonStyle, "PRIMARY", None)
+    if s == "danger":
+        return getattr(enums.ButtonStyle, "DANGER", None)
+    if s in ("success", "secondary"):
+        return getattr(enums.ButtonStyle, "SUCCESS", None)
+    return getattr(enums.ButtonStyle, "DEFAULT", None)
+
+
 def build_verify_keyboard(
     chat_id: int,
     required: list = None,
     session_id: str = None,
     *,
     missing: bool = False,
+    verify_style: str = "primary",
 ) -> InlineKeyboardMarkup:
     """Join buttons for every required chat + the VERIFY action.
 
     The buttons show **exactly** the label the admin set (``✏️`` in the panel) —
-    no prefixes are added, so an emoji only appears if it is part of the name.
+    and the style selected by the admin (primary, success, danger, default).
     """
     rows = []
     for entry in required or []:
         url = _button_url(entry)
         if not url:
             continue
-        rows.append([InlineKeyboardButton(_button_label(entry), url=url)])
+        style = button_style_from_str(entry.get("style"))
+        btn_kwargs = {"text": _button_label(entry), "url": url}
+        if style is not None:
+            btn_kwargs["style"] = style
+        rows.append([InlineKeyboardButton(**btn_kwargs)])
 
     action = "✅ VERIFY AGAIN" if missing else "✅ VERIFY"
-    rows.append(
-        [InlineKeyboardButton(action, callback_data=f"jr_v:{session_id or int(chat_id)}")]
-    )
+    v_style = button_style_from_str(verify_style)
+    v_kwargs = {"text": action, "callback_data": f"jr_v:{session_id or int(chat_id)}"}
+    if v_style is not None:
+        v_kwargs["style"] = v_style
+    rows.append([InlineKeyboardButton(**v_kwargs)])
     return InlineKeyboardMarkup(rows)
 
 
@@ -484,7 +506,8 @@ async def on_join_request(client, request: ChatJoinRequest):
         chat_username=chat_username,
     )
 
-    markup = build_verify_keyboard(chat.id, all_required, session["session_id"])
+    verify_style = doc.get("verify_style", "primary") if doc else "primary"
+    markup = build_verify_keyboard(chat.id, all_required, session["session_id"], verify_style=verify_style)
     photo = await welcome_photo(doc, scope=scope)
     try:
         await _send_card(client, user.id, text, markup, photo)
@@ -690,7 +713,13 @@ async def verify_and_approve(client, query: CallbackQuery, payload):
             f"Aapne ye join nahi kiya:\n{lines}\n\n"
             f"Neeche ke buttons se join karo, phir VERIFY AGAIN dabao 🙂\n"
             f"Attempt: {attempts}",
-            build_verify_keyboard(chat_id, missing, session["session_id"], missing=True),
+            build_verify_keyboard(
+                chat_id,
+                missing,
+                session["session_id"],
+                missing=True,
+                verify_style=doc.get("verify_style", "primary") if doc else "primary",
+            ),
         )
         return
 
@@ -1012,7 +1041,12 @@ async def send_test_card(client, chat_id: int, user) -> bool:
             client,
             user.id,
             text,
-            build_verify_keyboard(chat_id, all_required, session["session_id"]),
+            build_verify_keyboard(
+                chat_id,
+                all_required,
+                session["session_id"],
+                verify_style=doc.get("verify_style", "primary") if doc else "primary",
+            ),
             await welcome_photo(doc),
         )
         return True

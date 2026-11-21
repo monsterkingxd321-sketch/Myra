@@ -1,17 +1,30 @@
+import asyncio
 import functools
 import re
+import time
 from pyrogram import Client, filters, enums
 from pyrogram.handlers import MessageHandler
 from pyrogram.types import Message
 
 from Myra.userbot.chatbot_engine import get_chatbot_response, clean_word
 from Myra.ai import cleaner
-from Myra.ai.humanizer import respond_like_human
+from Myra.ai.humanizer import respond_like_human, should_reply
 from Myra.ai.audience import is_real_user, own_account_ids
 from Myra.database import training, settings
 from Myra.database.scope import current_scope, reset_scope, set_scope
 from Myra.userbot.storage import accounts as ub_accounts
 from Myra import mongo, config, LOGGER
+
+# Per-(account_id, chat_id) locks and cooldown tracking to prevent concurrency bursts & flood limits
+_chat_locks: dict[tuple[str, int], asyncio.Lock] = {}
+_last_reply_at: dict[tuple[str, int], float] = {}
+
+
+def _get_chat_lock(account_id: str, chat_id: int) -> asyncio.Lock:
+    key = (account_id, chat_id)
+    if key not in _chat_locks:
+        _chat_locks[key] = asyncio.Lock()
+    return _chat_locks[key]
 
 
 async def _resolve_delay_ms(account: dict) -> int:
@@ -29,17 +42,30 @@ async def _resolve_delay_ms(account: dict) -> int:
         return 0
 
 
-async def _resolve_chance(account: dict, group: bool) -> float:
+async def _resolve_chance(account: dict, group: bool, addressed: bool = False) -> float:
     """Reply probability (0-100): per-account wins, else the global value."""
     per_account = account.get("reply_chance")
     if per_account is not None:
         try:
-            return max(0.0, min(100.0, float(per_account)))
+            val = max(0.0, min(100.0, float(per_account)))
+            if addressed:
+                return 100.0 if val >= 50.0 else max(val * 1.5, val)
+            return val
         except Exception:
             pass
+    if addressed:
+        return 100.0
     if group:
         return await settings.get_group_chance()
     return await settings.get_private_chance()
+
+
+async def _resolve_reply_scope(account: dict) -> str:
+    """'both', 'groups', or 'private'."""
+    scope = account.get("reply_scope")
+    if scope in ("both", "groups", "private"):
+        return scope
+    return await settings.get_reply_scope()
 
 
 def _group_mode(account: dict) -> str:
@@ -138,17 +164,17 @@ def _check_group_mention_or_reply(message: Message, my_telegram_id: int, my_user
     return True, cleaned_text
 
 
-async def _reply_like_human(client: Client, message: Message, account: dict, response: dict, chance: float):
+async def _reply_like_human(client: Client, message: Message, account: dict, response: dict, chance: float = 100.0) -> bool:
     """Send the reply with the userbot's configured speed + human pacing."""
     delay_ms = await _resolve_delay_ms(account)
-    await respond_like_human(
+    return await respond_like_human(
         client,
         message,
         response,
         chance=chance,
         base_delay_ms=delay_ms,
         wpm=config.HUMAN_TYPING_WPM,
-        allow_split=config.HUMAN_SPLIT_REPLIES,
+        allow_split=False,  # Single message bubble prevents Telegram flood limits
         logger=LOGGER,
     )
 
@@ -181,9 +207,10 @@ async def register_userbot_handlers(client: Client, account_id: str):
         """
         Handle group messages.
 
-        Mentions / replies are always answered. Normal messages ("hy", "hello")
-        are answered too when the account's group mode is "all", like a real
-        person taking part in the chat.
+        Mentions / replies are answered. Normal messages ("hy", "hello")
+        are answered when group mode is "all".
+        Respects reply scope ('both', 'groups', 'private'), reply delay,
+        and reply probability without spamming or triggering flood limits.
         """
         account = ub_accounts.get(account_id)
         if not account:
@@ -193,10 +220,15 @@ async def register_userbot_handlers(client: Client, account_id: str):
         if not account.get("autochat", True):
             return
 
+        # ── 1. REPLY SCOPE CHECK (Both / Groups Only / DMs Only) ─────────
+        reply_scope = await _resolve_reply_scope(account)
+        if reply_scope == "private":
+            return  # DM-only mode active: ignore group messages
+
         my_id = account["telegram_id"]
         my_username = account.get("username", "")
 
-        # ── ONLY REAL USERS ────────────────────────────────────────────────
+        # ── 2. ONLY REAL USERS ───────────────────────────────────────────
         # Ignore our own messages, every bot (including the main bot), our
         # other userbot accounts, channel posts and anonymous admins.
         if not await is_real_user(message, my_id=my_id):
@@ -219,33 +251,64 @@ async def register_userbot_handlers(client: Client, account_id: str):
         if not addressed and _group_mode(account) != "all":
             return
 
-        # When not addressed we reply using the whole message, otherwise the
-        # mention is stripped from the text first.
         query_text = cleaned_text if addressed else raw_text
         sticker_id = message.sticker.file_unique_id if message.sticker else None
         if not query_text and not sticker_id:
             return
 
-        # Gemini only for messages that address the userbot (unless the operator
-        # opted in) so plain "hy" messages do not burn the API quota.
-        allow_ai = config.AI_GROUP_FALLBACK if addressed else config.AI_GROUP_FALLBACK_PLAIN
+        chat_id = message.chat.id
+        key = (account_id, chat_id)
+        lock = _get_chat_lock(account_id, chat_id)
 
-        response = await get_chatbot_response(
-            query_text,
-            sticker_id=sticker_id,
-            allow_ai=allow_ai,
-        )
-        if not response:
+        # ── 3. ANTI-SPAM CONCURRENCY CHECK ───────────────────────────────
+        # If userbot is ALREADY preparing/sending a reply in this chat, drop
+        # incoming messages so they don't queue up to send consecutive spam replies.
+        if lock.locked():
+            LOGGER.debug(f"Userbot ({account_id}) already responding in chat {chat_id}, skipping rapid message")
             return
 
-        chance = 100.0 if addressed else await _resolve_chance(account, group=True)
-        try:
-            await _reply_like_human(c, message, account, response, chance)
-        except Exception as e:
-            LOGGER.error(f"⚠️ Userbot ({account_id}) group reply error: {e}")
+        # ── 4. CHAT COOLDOWN CHECK ───────────────────────────────────────
+        delay_ms = await _resolve_delay_ms(account)
+        cooldown_sec = max(2.0, delay_ms / 1000.0)
+        now = time.time()
+        if (now - _last_reply_at.get(key, 0.0)) < cooldown_sec:
+            LOGGER.debug(f"Userbot ({account_id}) cooldown in chat {chat_id}, skipping")
+            return
+
+        # ── 5. % REPLY CHANCE CHECK (BEFORE GEMINI/DB LOOKUP) ────────────
+        chance = await _resolve_chance(account, group=True, addressed=addressed)
+        if not should_reply(chance):
+            LOGGER.debug(f"Userbot ({account_id}) skipped group reply by chance ({chance}%)")
+            return
+
+        # ── 6. PROCESS UNDER LOCK ────────────────────────────────────────
+        async with lock:
+            now = time.time()
+            if (now - _last_reply_at.get(key, 0.0)) < cooldown_sec:
+                return
+
+            allow_ai = config.AI_GROUP_FALLBACK if addressed else config.AI_GROUP_FALLBACK_PLAIN
+            response = await get_chatbot_response(
+                query_text,
+                sticker_id=sticker_id,
+                allow_ai=allow_ai,
+            )
+            if not response:
+                return
+
+            try:
+                sent = await _reply_like_human(c, message, account, response, chance=100.0)
+                if sent:
+                    _last_reply_at[key] = time.time()
+            except Exception as e:
+                LOGGER.error(f"⚠️ Userbot ({account_id}) group reply error: {e}")
 
     async def private_autochat_handler(c: Client, message: Message):
-        """Handle private (DM) chats when AutoChat is ON — real chatting."""
+        """
+        Handle private (DM) chats when AutoChat is ON.
+        Respects reply scope ('both', 'groups', 'private'), reply delay,
+        and reply probability without spamming or triggering flood limits.
+        """
         account = ub_accounts.get(account_id)
         if not account:
             return
@@ -254,10 +317,14 @@ async def register_userbot_handlers(client: Client, account_id: str):
         if not account.get("autochat", True):
             return
 
+        # ── 1. REPLY SCOPE CHECK (Both / Groups Only / DMs Only) ─────────
+        reply_scope = await _resolve_reply_scope(account)
+        if reply_scope == "groups":
+            return  # Groups-only mode active: ignore private DM messages
+
         my_id = account["telegram_id"]
 
-        # ── ONLY REAL USERS ────────────────────────────────────────────────
-        # A DM from the main bot or from another of our userbots is ignored.
+        # ── 2. ONLY REAL USERS ───────────────────────────────────────────
         if not await is_real_user(message, my_id=my_id):
             return
 
@@ -270,18 +337,49 @@ async def register_userbot_handlers(client: Client, account_id: str):
         if not raw_text and not sticker_id:
             return
 
-        response = await get_chatbot_response(
-            raw_text,
-            sticker_id=sticker_id,
-            allow_ai=config.AI_PRIVATE_FALLBACK,
-        )
-        if not response:
+        chat_id = message.chat.id
+        key = (account_id, chat_id)
+        lock = _get_chat_lock(account_id, chat_id)
+
+        # ── 3. ANTI-SPAM CONCURRENCY CHECK ───────────────────────────────
+        if lock.locked():
+            LOGGER.debug(f"Userbot ({account_id}) already responding in DM {chat_id}, skipping rapid message")
             return
 
-        chance = await _resolve_chance(account, group=False)
-        try:
-            await _reply_like_human(c, message, account, response, chance)
-        except Exception as e:
+        # ── 4. CHAT COOLDOWN CHECK ───────────────────────────────────────
+        delay_ms = await _resolve_delay_ms(account)
+        cooldown_sec = max(2.0, delay_ms / 1000.0)
+        now = time.time()
+        if (now - _last_reply_at.get(key, 0.0)) < cooldown_sec:
+            LOGGER.debug(f"Userbot ({account_id}) cooldown in DM {chat_id}, skipping")
+            return
+
+        # ── 5. % REPLY CHANCE CHECK (BEFORE GEMINI/DB LOOKUP) ────────────
+        chance = await _resolve_chance(account, group=False, addressed=True)
+        if not should_reply(chance):
+            LOGGER.debug(f"Userbot ({account_id}) skipped private reply by chance ({chance}%)")
+            return
+
+        # ── 6. PROCESS UNDER LOCK ────────────────────────────────────────
+        async with lock:
+            now = time.time()
+            if (now - _last_reply_at.get(key, 0.0)) < cooldown_sec:
+                return
+
+            response = await get_chatbot_response(
+                raw_text,
+                sticker_id=sticker_id,
+                allow_ai=config.AI_PRIVATE_FALLBACK,
+            )
+            if not response:
+                return
+
+            try:
+                sent = await _reply_like_human(c, message, account, response, chance=100.0)
+                if sent:
+                    _last_reply_at[key] = time.time()
+            except Exception as e:
+                LOGGER.error(f"⚠️ Userbot ({account_id}) private reply error: {e}")
             LOGGER.error(f"⚠️ Userbot ({account_id}) private reply error: {e}")
 
     # Register handlers directly on client using MessageHandler

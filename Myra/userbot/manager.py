@@ -73,6 +73,7 @@ class AccountManager:
         speed_mode = account_doc.get("speed_mode") or defaults["speed_mode"]
         group_mode = account_doc.get("group_mode") or defaults["group_mode"]
         reply_chance = account_doc.get("reply_chance")
+        reply_scope = account_doc.get("reply_scope") or defaults.get("reply_scope", "both")
 
         added_by = account_doc.get("added_by")
         if not added_by and config.OWNER_ID:
@@ -112,6 +113,7 @@ class AccountManager:
                 "speed_mode": speed_mode,
                 "group_mode": group_mode,
                 "reply_chance": reply_chance,
+                "reply_scope": reply_scope,
                 "status": "CONNECTED",
             }
 
@@ -173,6 +175,14 @@ class AccountManager:
             ub_accounts[account_id]["reply_chance"] = value
         await update_account(account_id, {"reply_chance": value})
         return value
+
+    async def set_reply_scope(self, account_id: str, mode: str) -> str:
+        """'both' = groups and DMs, 'groups' = group chats only, 'private' = DM only."""
+        mode = mode if mode in ("both", "groups", "private") else "both"
+        if account_id in ub_accounts:
+            ub_accounts[account_id]["reply_scope"] = mode
+        await update_account(account_id, {"reply_scope": mode})
+        return mode
 
     async def restart_account(self, account_id: str) -> bool:
         """Restart a userbot account using its saved session."""

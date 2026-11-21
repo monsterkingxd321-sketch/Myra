@@ -20,6 +20,7 @@ SETTINGS = bot_mongo["UserbotDB"]["settings"] if bot_mongo is not None else None
 KEY_REPLY_DELAY = "reply_delay_ms"
 KEY_GROUP_CHANCE = "group_reply_chance"
 KEY_PRIVATE_CHANCE = "private_reply_chance"
+KEY_REPLY_SCOPE = "reply_scope"
 
 # Group Request Controller (auto-approve join requests)
 KEY_JOINREQ_ENABLED = "joinreq_enabled"
@@ -116,11 +117,65 @@ async def set_private_chance(percent: float, scope: str = None) -> bool:
     return await set_setting(KEY_PRIVATE_CHANCE, max(0.0, min(100.0, float(percent))), scope)
 
 
+async def get_reply_scope(scope: str = None) -> str:
+    """Chat reply scope: 'both', 'groups', or 'private'."""
+    val = await get_setting(KEY_REPLY_SCOPE, "both", scope)
+    return val if val in ("both", "groups", "private") else "both"
+
+
+async def set_reply_scope(mode: str, scope: str = None) -> bool:
+    mode = mode if mode in ("both", "groups", "private") else "both"
+    return await set_setting(KEY_REPLY_SCOPE, mode, scope)
+
+
+def parse_delay_text(text: str) -> int | None:
+    """
+    Parse delay input in milliseconds or seconds safely.
+    Examples:
+      "500" -> 500 ms
+      "1500" -> 1500 ms
+      "5s" -> 5000 ms
+      "2.5s" -> 2500 ms
+      "5" -> 5000 ms (<= 60 is treated as seconds)
+      "0" -> 0 ms
+    """
+    if not text:
+        return None
+    t = str(text).strip().lower()
+    is_sec = False
+    if t.endswith("ms"):
+        t = t[:-2].strip()
+    elif t.endswith("sec") or t.endswith("secs"):
+        t = t.rstrip("secs").strip()
+        is_sec = True
+    elif t.endswith("s"):
+        t = t[:-1].strip()
+        is_sec = True
+
+    try:
+        val = float(t)
+        if val < 0:
+            return None
+        if val == 0:
+            return 0
+        if is_sec:
+            ms = int(val * 1000)
+        elif val <= 60:
+            # Users often enter e.g. "5" meaning 5 seconds, not 5 milliseconds
+            ms = int(val * 1000)
+        else:
+            ms = int(val)
+        return min(ms, 300_000)  # max 5 mins
+    except (ValueError, TypeError):
+        return None
+
+
 __all__ = [
     "SETTINGS",
     "KEY_REPLY_DELAY",
     "KEY_GROUP_CHANCE",
     "KEY_PRIVATE_CHANCE",
+    "KEY_REPLY_SCOPE",
     "get_setting",
     "set_setting",
     "get_reply_delay",
@@ -129,4 +184,7 @@ __all__ = [
     "set_group_chance",
     "get_private_chance",
     "set_private_chance",
+    "get_reply_scope",
+    "set_reply_scope",
+    "parse_delay_text",
 ]

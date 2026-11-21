@@ -295,19 +295,20 @@ async def respond_like_human(
         if not text:
             return False
 
-        await asyncio.sleep(reading_pause(text))
         if base_delay_ms and base_delay_ms > 0:
-            await asyncio.sleep(base_delay_ms / 1000.0)
+            delay_sec = max(0.5, base_delay_ms / 1000.0)
+            await _typing_for(client, message.chat.id, delay_sec)
+        else:
+            await asyncio.sleep(reading_pause(text))
+            await _typing_for(client, message.chat.id, min(typing_seconds(text, wpm), 3.0))
 
-        bubble_delay = random.uniform(0.9, 2.2)
-        for part in maybe_split(text) if allow_split else [text]:
+        parts = maybe_split(text) if allow_split else [text]
+        for idx, part in enumerate(parts):
             if not part:
                 continue
-            await _typing_for(client, message.chat.id, typing_seconds(part, wpm))
+            if idx > 0:
+                await _typing_for(client, message.chat.id, min(typing_seconds(part, wpm), 2.0))
             await message.reply_text(part)
-            await asyncio.sleep(random.uniform(0.2, 0.5))
-            if part is not text:
-                await asyncio.sleep(bubble_delay)
         return True
 
     except asyncio.CancelledError:

@@ -26,11 +26,12 @@ accounts = {}
 # A session that is logged in / uploaded should be *ready to chat* without any
 # extra panel tapping: AutoChat on, human "medium" pace, replies to every group
 # message and never skips one (100%).
-ACCOUNT_SETTINGS_VERSION = 2
+ACCOUNT_SETTINGS_VERSION = 3
 DEFAULT_SPEED_MODE = "medium"
 DEFAULT_REPLY_DELAY = 5000
 DEFAULT_GROUP_MODE = "all"
-DEFAULT_REPLY_CHANCE = 100.0
+DEFAULT_REPLY_CHANCE = None
+DEFAULT_REPLY_SCOPE = "both"
 
 
 def default_account_settings() -> dict:
@@ -45,6 +46,7 @@ def default_account_settings() -> dict:
         "speed_mode": DEFAULT_SPEED_MODE,
         "group_mode": DEFAULT_GROUP_MODE,
         "reply_chance": DEFAULT_REPLY_CHANCE,
+        "reply_scope": DEFAULT_REPLY_SCOPE,
         "settings_version": ACCOUNT_SETTINGS_VERSION,
     }
 

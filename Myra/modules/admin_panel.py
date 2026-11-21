@@ -538,6 +538,15 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     welcome = chat.get("welcome")
     photo = chat.get("welcome_photo")
     counters = chat.get("counters") or {}
+    verify_style = chat.get("verify_style", "primary")
+
+    style_names = {
+        "primary": "🔵 Primary",
+        "success": "🟢 Success",
+        "danger": "🔴 Danger",
+        "default": "⚪ Default",
+    }
+    v_style_badge = style_names.get(verify_style, "🔵 Primary")
 
     lines = [
         f"🧪 **MUST-JOIN SETUP — {title}** {uname}",
@@ -545,6 +554,7 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         f"🤖 **Auto-approve:** {'✅ ON' if auto else '❌ OFF'} _{auto_src}_",
         f"⏱ **Session timeout:** `{timeout} min`",
         f"🔔 **Admin alerts:** {'✅ ON' if notify else '❌ OFF'}",
+        f"🎨 **VERIFY style:** {v_style_badge}",
         f"✨ **Welcome:** {'custom' if welcome else 'default'}"
         f" · 🖼 **Photo:** {'set' if photo else 'none (global)'}",
         f"📨 Requests: `{counters.get('pending', 0)}` · ✅ `{counters.get('verified', 0)}`"
@@ -558,12 +568,15 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     else:
         for index, entry in enumerate(required, 1):
             label = entry.get("label") or entry.get("username") or str(entry.get("chat_id"))
+            entry_style = entry.get("style", "default")
+            s_tag = style_names.get(entry_style, "⚪ Default")
             if joinreq_service._is_manual(entry):
-                lines.append(f"`{index}.` **{label}** — 🖐 manual (admin verify)")
+                url_preview = (entry.get("invite") or "")[:28]
+                lines.append(f"`{index}.` **{label}** [{s_tag}] — 🖐 `{url_preview}`")
                 continue
             handle = f"@{entry['username']}" if entry.get("username") else "private"
             bad = " ⚠️" if entry not in usable else ""
-            lines.append(f"`{index}.` **{label}** — {handle}{bad}")
+            lines.append(f"`{index}.` **{label}** [{s_tag}] — {handle}{bad}")
         if manual:
             lines.append(
                 "🖐 manual links bot check nahi kar sakta — VERIFY ke baad admin ko "
@@ -576,7 +589,7 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         )
     if required:
         lines.append(
-            "✏️ kisi button se uska **naam** badal sakte ho · 🗑 se hatao."
+            "✏️ se button **naam** · 🔗 se **link/URL** · 🎨 se **Telegram style** badlo."
         )
 
     rows = [
@@ -598,17 +611,28 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
             ),
             InlineKeyboardButton("➕ Add Channel/Group", callback_data=f"ad_jr_radd:{chat_id}"),
         ],
+        [
+            InlineKeyboardButton(
+                f"🎨 VERIFY Button: {v_style_badge}", callback_data=f"ad_jr_vstyle:{chat_id}"
+            ),
+        ],
     ]
+    style_short = {
+        "primary": "🔵",
+        "success": "🟢",
+        "danger": "🔴",
+        "default": "⚪",
+    }
     for index, entry in enumerate(required):
-        label = (entry.get("label") or entry.get("username") or str(entry.get("chat_id")))[:18]
-        if joinreq_service._is_manual(entry):
-            prefix = "🖐"
-        else:
-            prefix = "⚠️" if entry not in usable else "🔗"
+        label = (entry.get("label") or entry.get("username") or str(entry.get("chat_id")))[:14]
+        entry_style = entry.get("style", "default")
+        s_icon = style_short.get(entry_style, "⚪")
         rows.append([
             InlineKeyboardButton(
-                f"✏️ {prefix} {label}", callback_data=f"ad_jr_rlabel:{chat_id}:{index}"
+                f"✏️ {label}", callback_data=f"ad_jr_rlabel:{chat_id}:{index}"
             ),
+            InlineKeyboardButton("🔗 Link", callback_data=f"ad_jr_rlink:{chat_id}:{index}"),
+            InlineKeyboardButton(f"🎨 {s_icon}", callback_data=f"ad_jr_rstyle:{chat_id}:{index}"),
             InlineKeyboardButton("🗑", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
         ])
     rows.append([
@@ -663,20 +687,30 @@ async def _ai_panel() -> tuple[str, InlineKeyboardMarkup]:
 
 
 async def _behaviour_panel() -> tuple[str, InlineKeyboardMarkup]:
-    delay, group_chance, dm_chance = await asyncio.gather(
+    delay, group_chance, dm_chance, reply_scope = await asyncio.gather(
         _safe(ai_settings.get_reply_delay(), 0),
         _safe(ai_settings.get_group_chance(), 100),
         _safe(ai_settings.get_private_chance(), 100),
+        _safe(ai_settings.get_reply_scope(), "both"),
     )
+
+    scope_labels = {
+        "both": "Both (Groups & DMs) 🌐",
+        "groups": "Groups Only 👥",
+        "private": "DMs Only ✉️",
+    }
+    scope_str = scope_labels.get(reply_scope, "Both 🌐")
 
     text = (
         "🎛 **REPLY BEHAVIOUR (all userbots)**\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"⚡ **Reply delay:** `{delay} ms` ({delay / 1000:g}s)\n"
+        f"🌐 **Reply scope:** `{scope_str}`\n"
         f"🎲 **Group chance:** `{group_chance:g}%`\n"
         f"✉️ **DM chance:** `{dm_chance:g}%`\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Delay = reply se pehle kitna rukna hai.\n"
+        "Delay = reply se pehle typing indicator delay (anti-spam protection).\n"
+        "Scope = groups me, DMs me, ya dono me reply karna hai.\n"
         "Chance = kitne % messages ka reply dena hai.\n"
         "Per-userbot override `/useraccounts` se kar sakte ho."
     )
@@ -687,6 +721,7 @@ async def _behaviour_panel() -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton("⚙️ Custom delay", callback_data="ad_bev_custom"),
+            InlineKeyboardButton(f"🌐 Scope: {reply_scope.title()}", callback_data="ad_bev_scope"),
         ],
         [
             InlineKeyboardButton("🎲 Group chance", callback_data="ad_bev_chance:group"),
@@ -1212,6 +1247,90 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         await query.answer()
         return
 
+    if data.startswith("ad_jr_rlink:"):
+        parts = data.split(":", 2)
+        if len(parts) != 3:
+            return await query.answer("❌ Galat data.", show_alert=True)
+        try:
+            chat_id, index = int(parts[1]), int(parts[2])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat data.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        required = list(doc.get("required") or [])
+        if not 0 <= index < len(required):
+            return await query.answer("❌ Ye entry nahi mili.", show_alert=True)
+        entry = required[index]
+        current_url = entry.get("invite") or (f"https://t.me/{entry.get('username')}" if entry.get("username") else "auto")
+        pending_input[user_id] = {
+            "kind": "jr_req_link",
+            "chat_id": chat_id,
+            "index": index,
+        }
+        try:
+            await query.message.edit_text(
+                "🔗 **Button ka link / URL badlo**\n\n"
+                f"Abhi link: `{current_url}`\n\n"
+                "Naya invite link ya URL bhejo (e.g. `https://t.me/...` ya `t.me/+...` ya website link).\n"
+                "User button click karega to is link par redirect hoga.\n\n"
+                "`/cancel` se cancel kar sakte ho.",
+                reply_markup=InlineKeyboardMarkup([[_back(f"ad_jr_set:{chat_id}")]]),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        await query.answer()
+        return
+
+    if data.startswith("ad_jr_rstyle:"):
+        parts = data.split(":", 2)
+        if len(parts) != 3:
+            return await query.answer("❌ Galat data.", show_alert=True)
+        try:
+            chat_id, index = int(parts[1]), int(parts[2])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat data.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        required = list(doc.get("required") or [])
+        if not 0 <= index < len(required):
+            return await query.answer("❌ Ye entry nahi mili.", show_alert=True)
+        entry = dict(required[index])
+        current_style = entry.get("style", "default")
+        cycle = ["default", "primary", "success", "danger"]
+        try:
+            idx = cycle.index(current_style)
+        except ValueError:
+            idx = 0
+        new_style = cycle[(idx + 1) % len(cycle)]
+        entry["style"] = new_style
+        required[index] = entry
+        await jdb.set_required(chat_id, required)
+        style_names = {"primary": "🔵 Primary", "success": "🟢 Success", "danger": "🔴 Danger", "default": "⚪ Default"}
+        await show(await _jr_req_panel(chat_id), f"🎨 Style: {style_names.get(new_style)}")
+        return
+
+    if data.startswith("ad_jr_vstyle:"):
+        try:
+            chat_id = int(data.split(":", 1)[1])
+        except Exception:  # noqa: BLE001
+            return await query.answer("❌ Galat data.", show_alert=True)
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            return await query.answer("❌ Ye group ab managed list mein nahi hai.", show_alert=True)
+        current_vstyle = doc.get("verify_style", "primary")
+        cycle = ["primary", "success", "danger", "default"]
+        try:
+            idx = cycle.index(current_vstyle)
+        except ValueError:
+            idx = 0
+        new_vstyle = cycle[(idx + 1) % len(cycle)]
+        await jdb.set_option(chat_id, "verify_style", new_vstyle)
+        style_names = {"primary": "🔵 Primary", "success": "🟢 Success", "danger": "🔴 Danger", "default": "⚪ Default"}
+        await show(await _jr_req_panel(chat_id), f"🎨 VERIFY Style: {style_names.get(new_vstyle)}")
+        return
+
     # ── clones ─────────────────────────────────────────────────────────────
     if data == "ad_clones":
         await show(await _clones_panel())
@@ -1278,13 +1397,37 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         try:
             await query.message.edit_text(
                 "⚙️ **Custom reply delay**\n\n"
-                "Milliseconds me bhejo (e.g. `500`, `1500`, `7000`).\n"
+                "Seconds ya milliseconds me bhejo:\n"
+                "• `5s` ya `5` = 5 seconds (5000 ms)\n"
+                "• `10s` ya `10` = 10 seconds (10000 ms)\n"
+                "• `1500` = 1.5 seconds (1500 ms)\n"
+                "• `0` = Instant\n\n"
                 "`/cancel` se cancel kar sakte ho.",
                 reply_markup=InlineKeyboardMarkup([[_back("ad_behaviour")]]),
             )
         except Exception:  # noqa: BLE001
             pass
         await query.answer()
+        return
+
+    if data == "ad_bev_scope":
+        current = await ai_settings.get_reply_scope()
+        cycle = ["both", "groups", "private"]
+        try:
+            idx = cycle.index(current)
+        except ValueError:
+            idx = 0
+        new_scope = cycle[(idx + 1) % len(cycle)]
+        await ai_settings.set_reply_scope(new_scope)
+        applied = 0
+        for account_id in list(_my_accounts().keys()):
+            try:
+                await userbot_manager.set_reply_scope(account_id, new_scope)
+                applied += 1
+            except Exception:
+                pass
+        lbl = {"both": "Both 🌐", "groups": "Groups Only 👥", "private": "DMs Only ✉️"}.get(new_scope)
+        await show(await _behaviour_panel(), f"🌐 Scope: {lbl} · {applied} userbots")
         return
 
     if data.startswith("ad_bev_chance:"):
@@ -1304,7 +1447,14 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
             await ai_settings.set_group_chance(new_value)
         else:
             await ai_settings.set_private_chance(new_value)
-        await show(await _behaviour_panel(), f"🎲 {scope}: {new_value:g}%")
+        applied = 0
+        for account_id in list(_my_accounts().keys()):
+            try:
+                await userbot_manager.set_reply_chance(account_id, new_value)
+                applied += 1
+            except Exception:
+                pass
+        await show(await _behaviour_panel(), f"🎲 {scope}: {new_value:g}% · {applied} userbots")
         return
 
     if data == "ad_clean":
@@ -1598,12 +1748,9 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
         return True
 
     if kind == "delay":
-        if not text.isdigit():
-            await message.reply("❌ Number of milliseconds chahiye (e.g. `1500`). `/cancel` to cancel.")
-            return True
-        ms = int(text)
-        if ms > 300_000:
-            await message.reply("❌ Maximum 300000 ms (5 minutes).")
+        ms = ai_settings.parse_delay_text(text)
+        if ms is None:
+            await message.reply("❌ Valid delay bhejo (e.g. `5`, `5s`, `1500`, `0`). `/cancel` to cancel.")
             return True
         pending_input.pop(user_id, None)
         await ai_settings.set_reply_delay(ms)
@@ -1616,7 +1763,7 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
                 pass
         text_markup = await _behaviour_panel()
         await message.reply_text(
-            f"✅ **Delay {ms} ms** set for `{applied}` userbot(s).",
+            f"✅ **Delay {ms} ms ({ms / 1000:g}s)** set for `{applied}` userbot(s).",
             reply_markup=text_markup[1],
         )
         return True
@@ -1795,6 +1942,47 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
         pending_input.pop(user_id, None)
         await message.reply_text(
             f"✏️ Button ka naam ab **{new_label}** hai.",
+            reply_markup=(await _jr_req_panel(chat_id))[1],
+        )
+        return True
+
+    if kind == "jr_req_link":
+        chat_id = flow.get("chat_id")
+        try:
+            index = int(flow.get("index"))
+        except Exception:  # noqa: BLE001
+            index = -1
+        doc = await jdb.get_chat(chat_id)
+        if not doc:
+            pending_input.pop(user_id, None)
+            await message.reply_text("❌ Wo group ab managed list mein nahi hai.")
+            return True
+        required = list(doc.get("required") or [])
+        if not 0 <= index < len(required):
+            pending_input.pop(user_id, None)
+            await message.reply_text("❌ Ye entry ab list mein nahi hai.")
+            return True
+
+        new_url = text.strip()
+        if not new_url:
+            await message.reply_text("❌ Link khali nahi ho sakta.")
+            return True
+        if not new_url.startswith(("http://", "https://", "tg://")):
+            if new_url.startswith("@"):
+                new_url = f"https://t.me/{new_url[1:]}"
+            elif new_url.startswith("t.me/"):
+                new_url = f"https://{new_url}"
+            else:
+                new_url = f"https://{new_url}"
+
+        entry = dict(required[index])
+        entry["invite"] = new_url
+        required[index] = entry
+        await jdb.set_required(chat_id, required)
+        pending_input.pop(user_id, None)
+        label = entry.get("label") or "Button"
+        await message.reply_text(
+            f"🔗 **{label}** ka link update ho gaya:\n`{new_url}`",
             reply_markup=(await _jr_req_panel(chat_id))[1],
         )
         return True

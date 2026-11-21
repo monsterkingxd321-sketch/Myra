@@ -238,6 +238,14 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
     _chance = in_mem.get("reply_chance", acc.get("reply_chance"))
     chance_label = "Global" if _chance is None else f"{float(_chance):g}%"
 
+    _scope = in_mem.get("reply_scope") or acc.get("reply_scope") or "both"
+    scope_label_map = {
+        "both": "Both (Groups & DMs) 🌐",
+        "groups": "Groups Only 👥",
+        "private": "DMs Only ✉️",
+    }
+    scope_label = scope_label_map.get(_scope, "Both 🌐")
+
     added_by = acc.get("added_by")
     owner_id = owner_id_sync()
     if added_by and owner_id and int(added_by) == owner_id:
@@ -257,6 +265,7 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
         f"📊 **Connection:** {status_str}\n"
         f"🤖 **AutoChat:** {autochat_label}\n"
         f"⚡ **Reply Speed:** {speed_label}\n"
+        f"🌐 **Reply In:** {scope_label}\n"
         f"💬 **Group Reply:** {group_label}\n"
         f"🎲 **Reply Chance:** {chance_label}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
@@ -306,18 +315,28 @@ async def _build_speed_menu(account_id: str, viewer_id: int) -> tuple[str, Inlin
     else:
         chance_label = f"{float(chance):g}%"
 
+    _scope = in_mem.get("reply_scope") or acc.get("reply_scope") or "both"
+    scope_map = {
+        "both": "Both (Groups & DMs) 🌐",
+        "groups": "Groups Only 👥",
+        "private": "DMs Only ✉️",
+    }
+    scope_label = scope_map.get(_scope, "Both 🌐")
+
     speed_text = (
         f"⚡ **Reply Behaviour: {name}** {username_str}\n\n"
         f"📊 **Current Speed:** `{current_speed_str}`\n"
+        f"🌐 **Reply In:** `{scope_label}`\n"
         f"💬 **Group Reply:** `{group_label}`\n"
         f"🎲 **Reply Chance:** `{chance_label}`\n\n"
-        "**Speed** — how fast it replies:\n"
+        "**Speed** — how fast it replies (sets typing delay & prevents spam):\n"
         "• ⚡ **Fast**: Instant reply (0s delay)\n"
         "• ⏱ **Medium**: 5s delay (human pace)\n"
         "• 🐢 **Slow**: 10s delay (relaxed pace)\n"
-        "• ⚙️ **Custom**: Enter custom delay in milliseconds\n"
+        "• ⚙️ **Custom**: Enter custom delay (e.g. `5s` or `1500`)\n"
+        "**Reply In** — reply in groups only, DMs only, or both.\n"
         "**Group Reply** — reply to every message, or only when tagged.\n"
-        "**Reply Chance** — how often it replies (100% = always).\n"
+        "**Reply Chance** — how often it replies (% probability).\n"
         "━━━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -331,7 +350,8 @@ async def _build_speed_menu(account_id: str, viewer_id: int) -> tuple[str, Inlin
             InlineKeyboardButton("⚙️ Custom Delay", callback_data=f"ub_setspeed:{account_id}:custom"),
         ],
         [
-            InlineKeyboardButton("💬 Group Reply Mode", callback_data=f"ub_gmode:{account_id}"),
+            InlineKeyboardButton(f"🌐 Reply In: {_scope.title()}", callback_data=f"ub_scope:{account_id}"),
+            InlineKeyboardButton("💬 Group Mode", callback_data=f"ub_gmode:{account_id}"),
         ],
         [
             InlineKeyboardButton("🎲 Reply Chance", callback_data=f"ub_chance:{account_id}"),
@@ -723,8 +743,11 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             }
             await query.message.edit_text(
                 "⚙️ **Enter Custom Reply Delay**\n\n"
-                "Please send the delay in **milliseconds** (e.g. `500`, `1500`, `7000`, `30000`).\n"
-                "`1000` ms = 1 second.\n\n"
+                "Aap delay **seconds** ya **milliseconds** mein bhej sakte ho:\n"
+                "• `5s` ya `5` = 5 seconds (5000 ms)\n"
+                "• `10s` ya `10` = 10 seconds (10000 ms)\n"
+                "• `1500` = 1.5 seconds (1500 ms)\n"
+                "• `0` = Instant (no delay)\n\n"
                 "Send /cancel to cancel.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("❌ Cancel", callback_data=f"ub_speed:{account_id}")]
@@ -732,6 +755,32 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             )
             await query.answer()
             return
+
+    # Toggle Reply Scope (both -> groups -> private -> both)
+    if data.startswith("ub_scope:"):
+        account_id = data.split(":", 1)[1]
+        can_manage, acc = await _can_manage_account(user_id, account_id)
+        if not can_manage:
+            return await query.answer("❌ You do not have permission to manage this userbot.", show_alert=True)
+
+        in_mem = ub_accounts.get(account_id, {})
+        current = in_mem.get("reply_scope") or (acc or {}).get("reply_scope") or "both"
+        cycle = ["both", "groups", "private"]
+        try:
+            idx = cycle.index(current)
+        except ValueError:
+            idx = 0
+        new_scope = cycle[(idx + 1) % len(cycle)]
+        await userbot_manager.set_reply_scope(account_id, new_scope)
+
+        lbl = {"both": "Both (Groups & DMs) 🌐", "groups": "Groups Only 👥", "private": "DMs Only ✉️"}.get(new_scope)
+        await query.answer(f"🌐 Reply Scope: {lbl}", show_alert=True)
+        text, markup = await _build_speed_menu(account_id, user_id)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        return
 
     # Toggle Group Reply Mode (all messages vs only when tagged)
     if data.startswith("ub_gmode:"):
@@ -982,14 +1031,15 @@ async def userbot_auth_messages_handler(client: Myra, m: Message):
             m.stop_propagation()
             return
 
-        if not re.fullmatch(r"^\d+$", text):
-            await m.reply("❌ Please enter a valid positive number in milliseconds (e.g. `500`, `2000`, `15000`):")
-            m.stop_propagation()
-            return
-
-        delay_ms = int(text)
-        if delay_ms < 0 or delay_ms > 300000:
-            await m.reply("❌ Please enter a delay between 0 and 300000 milliseconds (300 seconds):")
+        delay_ms = ai_settings.parse_delay_text(text)
+        if delay_ms is None:
+            await m.reply(
+                "❌ Valid number ya seconds bhejo (e.g. `5`, `5s`, `2000`, `15000`):\n"
+                "• `5` ya `5s` = 5 seconds (5000 ms)\n"
+                "• `1500` = 1.5 seconds (1500 ms)\n"
+                "• `0` = Instant\n"
+                "`/cancel` se cancel kar sakte ho."
+            )
             m.stop_propagation()
             return
 
