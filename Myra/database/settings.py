@@ -27,6 +27,8 @@ KEY_JOINREQ_ENABLED = "joinreq_enabled"
 KEY_JOINREQ_AUTO = "joinreq_autoapprove"
 KEY_JOINREQ_WELCOME = "joinreq_welcome"
 KEY_JOINREQ_PHOTO = "joinreq_welcome_photo"
+KEY_JOINREQ_NOTIFY = "joinreq_notify"
+KEY_GROUP_MODE = "group_reply_mode"
 
 
 def _default_delay() -> int:
@@ -128,23 +130,52 @@ async def set_reply_scope(mode: str, scope: str = None) -> bool:
     return await set_setting(KEY_REPLY_SCOPE, mode, scope)
 
 
+async def get_joinreq_notify(scope: str = None) -> bool:
+    """True if admin alerts for join requests are ON, False if silent/muted."""
+    return await get_setting(KEY_JOINREQ_NOTIFY, default=False, scope=scope)
+
+
+async def set_joinreq_notify(enabled: bool, scope: str = None) -> bool:
+    """Toggle join request notifications to admins."""
+    return await set_setting(KEY_JOINREQ_NOTIFY, bool(enabled), scope=scope)
+
+
+async def get_group_reply_mode(chat_id: int) -> str:
+    """
+    Get replying mode for a group:
+      - 'tag_only': replies only when tagged (@mention, bot name) or replied to
+      - 'all': replies to every message
+      - 'medium': tag/reply 100% + partial replies in between (default)
+    """
+    val = await get_setting(f"{KEY_GROUP_MODE}:{chat_id}", default="medium")
+    return val if val in ("tag_only", "all", "medium") else "medium"
+
+
+async def set_group_reply_mode(chat_id: int, mode: str) -> bool:
+    """Set replying mode for a group."""
+    mode = mode if mode in ("tag_only", "all", "medium") else "medium"
+    return await set_setting(f"{KEY_GROUP_MODE}:{chat_id}", mode)
+
+
 def parse_delay_text(text: str) -> int | None:
     """
     Parse delay input in milliseconds or seconds safely.
     Examples:
-      "500" -> 500 ms
-      "1500" -> 1500 ms
-      "5s" -> 5000 ms
-      "2.5s" -> 2500 ms
-      "5" -> 5000 ms (<= 60 is treated as seconds)
+      "100" -> 100,000 ms (100 seconds)
+      "5" -> 5000 ms (5 seconds)
+      "100s" -> 100,000 ms (100 seconds)
+      "100ms" -> 100 ms (0.1 second)
+      "1500" -> 1500 ms (>= 1000 without unit is milliseconds)
       "0" -> 0 ms
     """
     if not text:
         return None
     t = str(text).strip().lower()
     is_sec = False
+    is_ms = False
     if t.endswith("ms"):
         t = t[:-2].strip()
+        is_ms = True
     elif t.endswith("sec") or t.endswith("secs"):
         t = t.rstrip("secs").strip()
         is_sec = True
@@ -158,14 +189,17 @@ def parse_delay_text(text: str) -> int | None:
             return None
         if val == 0:
             return 0
-        if is_sec:
+        if is_ms:
+            ms = int(val)
+        elif is_sec:
             ms = int(val * 1000)
-        elif val <= 60:
-            # Users often enter e.g. "5" meaning 5 seconds, not 5 milliseconds
+        elif val < 1000:
+            # Bare numbers < 1000 (e.g. 5, 10, 60, 100, 300) are treated as SECONDS!
             ms = int(val * 1000)
         else:
+            # 1000, 1500, 2000, etc. are already milliseconds
             ms = int(val)
-        return min(ms, 300_000)  # max 5 mins
+        return min(ms, 600_000)  # max 10 mins
     except (ValueError, TypeError):
         return None
 
@@ -176,6 +210,8 @@ __all__ = [
     "KEY_GROUP_CHANCE",
     "KEY_PRIVATE_CHANCE",
     "KEY_REPLY_SCOPE",
+    "KEY_JOINREQ_NOTIFY",
+    "KEY_GROUP_MODE",
     "get_setting",
     "set_setting",
     "get_reply_delay",
@@ -186,5 +222,9 @@ __all__ = [
     "set_private_chance",
     "get_reply_scope",
     "set_reply_scope",
+    "get_joinreq_notify",
+    "set_joinreq_notify",
+    "get_group_reply_mode",
+    "set_group_reply_mode",
     "parse_delay_text",
 ]

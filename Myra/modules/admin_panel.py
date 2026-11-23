@@ -36,7 +36,8 @@ from pyrogram.types import (
     Message,
 )
 
-from Myra import Myra, LOGGER
+from Myra import Myra, LOGGER, config
+from Myra.database import admins as adminsdb
 from Myra.database.admins import is_admin
 from Myra.database import autochat as ac
 from Myra.database import joinreq as jdb
@@ -148,26 +149,28 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
     users = len(users_list)
     totals = (audience or {}).get("totals", {})
     my_accounts = _my_accounts()
+    admins_list = await adminsdb.get_admins()
+    owner_str = str(config.OWNER_ID) if config.OWNER_ID else "Default"
+    clones = len(clones_list)
 
     text = (
-        "🛡 **ADMIN CONTROL PANEL**\n"
+        "✨ **MYRA ADMIN CONTROL PANEL** ✨\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🤖 **Bot:** {_bot_title()}\n"
-        f"👥 **Connected userbots:** `{len(my_accounts)}`\n"
-        f"💬 **Groups:** `{chats}`\n"
-        f"✉️ **DM users — bot:** `{users}` · **userbots:** `{totals.get('userbot_dm', 0)}`\n"
+        f"👑 **Owner ID:** `{owner_str}` · 🛡 **Admins:** `{len(admins_list)}`\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ **AutoChat — bot:** {'🟢 ON' if bot_auto else '🔴 OFF'}"
-        f" · `{ac.human_interval(bot_interval)}`"
-        f" · {ac.label_for_target(bot_targets)}\n"
-        f"⏰ **AutoChat — userbots:** {'🟢 ON' if ub_auto else '🔴 OFF'}"
-        f" · `{ac.human_interval(ub_interval)}`"
-        f" · {ac.label_for_target(ub_targets)}\n"
+        "📊 **Network & Audience:**\n"
+        f" ├ 💬 **Groups:** `{chats}`\n"
+        f" ├ ✉️ **Bot DMs:** `{users}`\n"
+        f" └ 👥 **Userbots:** `{len(my_accounts)}` online (DMs: `{totals.get('userbot_dm', 0)}`)\n\n"
+        "🧠 **AI & Automation Status:**\n"
+        f" ├ 🧠 **Engine:** {'Hybrid (DB + AI)' if ai.get('active') else 'Offline (DB only)'}\n"
+        f" ├ 🔑 **Active Keys:** `{ai.get('active', 0)}/{ai.get('total', 0)}`\n"
+        f" ├ 📚 **Trained DB:** `{db.get('total', 0):,}` pairs\n"
+        f" ├ 🤖 **Bot AutoChat:** {'🟢 ON' if bot_auto else '🔴 OFF'} ({ac.human_interval(bot_interval)})\n"
+        f" └ 👥 **Userbot AutoChat:** {'🟢 ON' if ub_auto else '🔴 OFF'} ({ac.human_interval(ub_interval)})\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📚 **Trained replies:** `{db.get('total', 0)}`\n"
-        f"🔑 **API keys:** `{ai.get('active', 0)}/{ai.get('total', 0)}`\n"
-        f"🧠 **Mode:** {'Hybrid (DB + AI)' if ai.get('active') else 'Offline (DB only)'}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
+        "Select a module below to configure:"
     )
 
     rows = [
@@ -176,8 +179,8 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton("⏰ AutoChat", callback_data="ad_ac"),
         ],
         [
+            InlineKeyboardButton(f"👑 Admins ({len(admins_list)})", callback_data="ad_admins"),
             InlineKeyboardButton("🚪 Group Requests", callback_data="ad_jr"),
-            InlineKeyboardButton("📊 Stats", callback_data="ad_stats"),
         ],
         [
             InlineKeyboardButton("👥 Userbots", callback_data="ad_userbots"),
@@ -187,17 +190,59 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton("🧠 AI & Keys", callback_data="ad_ai"),
             InlineKeyboardButton("🎛 Reply Behaviour", callback_data="ad_behaviour"),
         ],
+        [
+            InlineKeyboardButton(f"🧬 Clones ({clones})", callback_data="ad_clones"),
+            InlineKeyboardButton("📊 Stats", callback_data="ad_stats"),
+        ],
+        [
+            InlineKeyboardButton("🧹 Clean DB", callback_data="ad_clean"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="ad_main"),
+        ],
+        [
+            InlineKeyboardButton("❌ Close Panel", callback_data="ad_close"),
+        ],
     ]
-    clones = len(clones_list)
-    rows.append([
-        InlineKeyboardButton(f"🧬 Clones ({clones})", callback_data="ad_clones"),
-        InlineKeyboardButton("🧹 Clean DB", callback_data="ad_clean"),
-    ])
-    rows.append([
-        InlineKeyboardButton("🔄 Refresh", callback_data="ad_main"),
-        InlineKeyboardButton("❌ Close", callback_data="ad_close"),
-    ])
     return text, InlineKeyboardMarkup(rows)
+
+
+async def _admins_panel() -> tuple[str, InlineKeyboardMarkup]:
+    """Admin management panel for viewing, adding, and removing authorized bot admins."""
+    admins = await adminsdb.get_admins()
+    owner_id = int(config.OWNER_ID) if config.OWNER_ID else None
+
+    lines = [
+        "👑 **BOT ADMIN MANAGEMENT**",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        f"👑 **Owner ID:** `{owner_id or 'Not set'}`",
+        f"🛡 **Authorized Admins:** `{len(admins)}`",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+    if not admins:
+        lines.append("ℹ️ *Abhi koi extra admin added nahi hai.*")
+    else:
+        for idx, adm in enumerate(admins, 1):
+            aid = adm["user_id"]
+            name = adm.get("name") or "Admin"
+            user = f"@{adm.get('username')}" if adm.get("username") else f"ID: `{aid}`"
+            lines.append(f"{idx}. 👤 **{name}** ({user})")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("➕ Click **Add Admin** to authorize a user via ID or @username.")
+
+    rows = []
+    for adm in admins[:12]:
+        aid = adm["user_id"]
+        name = adm.get("name") or str(aid)
+        rows.append([
+            InlineKeyboardButton(f"👤 {name} ({aid})", callback_data="ad_noop"),
+            InlineKeyboardButton("🗑 Remove", callback_data=f"ad_admin_del:{aid}"),
+        ])
+
+    rows.append([
+        InlineKeyboardButton("➕ Add Admin", callback_data="ad_admin_add"),
+        InlineKeyboardButton("🔄 Refresh", callback_data="ad_admins"),
+    ])
+    rows.append([_back()])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
 async def _broadcast_sender_panel() -> tuple[str, InlineKeyboardMarkup]:
@@ -430,12 +475,13 @@ def _jr_count(chats: list, key: str) -> int:
 
 
 async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
-    enabled, auto, welcome, photo, chats = await asyncio.gather(
+    enabled, auto, welcome, photo, chats, notify = await asyncio.gather(
         _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_ENABLED, default=False), False),
         _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_AUTO, default=True), True),
         _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_WELCOME, default=None), None),
         _safe(ai_settings.get_setting(ai_settings.KEY_JOINREQ_PHOTO, default=None), None),
         _safe(jdb.list_managed(), []),
+        _safe(ai_settings.get_joinreq_notify(), False),
     )
 
     req_total = 0
@@ -461,6 +507,7 @@ async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
         "button, phir seedha approve.\n\n"
         f"🚦 **Status:** {'🟢 ON' if enabled else '🔴 OFF'}\n"
         f"🤖 **Auto-approve:** {'✅ ON' if auto else '❌ OFF — admin approve karega'}\n"
+        f"🔔 **Join Alerts:** {'🟢 ON (Admins get DMs)' if notify else '🔴 OFF (Muted / Silent)'}\n"
         f"   ↳ ON + 0 required link = request **turant** approve (DM/VERIFY ki "
         f"zarurat nahi)\n"
         f"🏘 **Managed groups:** `{len(chats)}` · 🔗 required links `{req_total}`\n"
@@ -493,6 +540,7 @@ async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
             ),
         ],
         [
+            InlineKeyboardButton(f"🔔 Alerts: {'🟢 ON' if notify else '🔴 OFF'}", callback_data="ad_jr_notify"),
             InlineKeyboardButton("🔁 Reset Stats", callback_data="ad_jr_reset"),
         ],
         [_back()],
@@ -953,9 +1001,44 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         await show(await _import_panel())
         return
 
+    # ── admin management ───────────────────────────────────────────────────
+    if data == "ad_admins":
+        await show(await _admins_panel())
+        return
+
+    if data == "ad_admin_add":
+        pending_input[user_id] = {"kind": "add_admin"}
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel", callback_data="ad_admin_cancel")]])
+        await show((
+            "👑 **ADD NEW ADMIN**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Please send the **Telegram User ID** or **@username** of the user you want to authorize as Bot Admin.\n\n"
+            "• Example: `1234567890` ya `@username`\n"
+            "• Send `/cancel` to cancel.",
+            markup,
+        ))
+        return
+
+    if data == "ad_admin_cancel":
+        pending_input.pop(user_id, None)
+        await show(await _admins_panel(), "Cancelled")
+        return
+
+    if data.startswith("ad_admin_del:"):
+        target_uid = int(data.split(":", 1)[1])
+        ok = await adminsdb.remove_admin(target_uid)
+        await show(await _admins_panel(), f"🗑 Admin `{target_uid}` removed!" if ok else "Failed to remove")
+        return
+
     # ── group request controller ───────────────────────────────────────────
     if data == "ad_jr":
         await show(await _jr_panel())
+        return
+
+    if data == "ad_jr_notify":
+        now = not await ai_settings.get_joinreq_notify()
+        await ai_settings.set_joinreq_notify(now)
+        await show(await _jr_panel(), "🔔 Alerts ON (Admins receive DMs)" if now else "🔕 Alerts OFF (Silent / Muted)")
         return
 
     if data == "ad_jr_tog":
@@ -2044,6 +2127,44 @@ async def _handle_pending_text(user_id: int, flow: dict, message: Message) -> bo
         )
         return True
 
+    if kind == "add_admin":
+        pending_input.pop(user_id, None)
+        raw = text.strip()
+        target_uid = None
+        target_name = ""
+        target_username = ""
+
+        if raw.isdigit() or (raw.startswith("-") and raw[1:].isdigit()):
+            target_uid = int(raw)
+        else:
+            try:
+                user_obj = await message._client.get_users(raw)
+                target_uid = user_obj.id
+                target_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+                target_username = user_obj.username or ""
+            except Exception as e:
+                await message.reply_text(f"❌ Could not resolve user `{raw}`: {e}")
+                return True
+
+        if not target_name:
+            try:
+                user_obj = await message._client.get_users(target_uid)
+                target_name = f"{user_obj.first_name or ''} {user_obj.last_name or ''}".strip()
+                target_username = user_obj.username or ""
+            except Exception:
+                target_name = f"User {target_uid}"
+
+        ok = await adminsdb.add_admin(target_uid, added_by=user_id, name=target_name, username=target_username)
+        if ok:
+            text_p, markup_p = await _admins_panel()
+            await message.reply_text(
+                f"✅ **Admin Added Successfully!**\n\n👤 **Name:** {target_name}\n🆔 **ID:** `{target_uid}`\n🔗 **Username:** @{target_username or '—'}\n\nThis user is now authorized to use all admin tools and commands.",
+                reply_markup=markup_p,
+            )
+        else:
+            await message.reply_text("❌ Failed to add admin to database.")
+        return True
+
     if kind == "broadcast":
         pending_input.pop(user_id, None)
         await _start_broadcast(user_id, flow, message)
@@ -2068,6 +2189,8 @@ async def admin_panel_input(client: Myra, m: Message):
             kind = flow.get("kind")
             if kind == "broadcast":
                 text_markup = await _broadcast_sender_panel()
+            elif kind == "add_admin":
+                text_markup = await _admins_panel()
             elif kind == "delay":
                 text_markup = await _behaviour_panel()
             elif kind == "interval":

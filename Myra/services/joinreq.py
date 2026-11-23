@@ -359,6 +359,9 @@ async def _notify_admins(client, title: str, body: str) -> None:
 
 
 async def _notify_admins_markup(client, title: str, body: str, markup=None) -> None:
+    from Myra.database import settings as ai_settings
+    if not await ai_settings.get_joinreq_notify():
+        return
     text = f"{title}\n\n{body}"
     for user_id in await _recipients():
         try:

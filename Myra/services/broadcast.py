@@ -71,14 +71,26 @@ BOT_SLEEP = 0.35
 class Content:
     """A broadcast payload: plain text, or a message with/without media."""
 
-    def __init__(self, kind: str = "text", text: str = "", message=None, file_path: str = ""):
+    def __init__(
+        self,
+        kind: str = "text",
+        text: str = "",
+        message=None,
+        file_path: str = "",
+        is_forward: bool = False,
+        forward_chat_id: int = None,
+        forward_msg_id: int = None,
+    ):
         self.kind = kind
         self.text = text or ""
         self.message = message
         self.file_path = file_path
+        self.is_forward = is_forward
+        self.forward_chat_id = forward_chat_id
+        self.forward_msg_id = forward_msg_id
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
-        return f"<Content {self.kind} text={self.text[:30]!r}>"
+        return f"<Content {self.kind} forward={self.is_forward} text={self.text[:30]!r}>"
 
 
 def _detect_kind(message) -> str:
@@ -103,7 +115,22 @@ def content_from_message(message) -> Content:
     """Build a :class:`Content` from a Telegram message (reply target)."""
     kind = _detect_kind(message)
     text = message.text or message.caption or ""
-    return Content(kind=kind, text=text, message=message)
+    is_fwd = bool(
+        getattr(message, "forward_date", None)
+        or getattr(message, "forward_from_chat", None)
+        or getattr(message, "forward_from", None)
+        or getattr(message, "forward_sender_name", None)
+    )
+    fwd_chat_id = getattr(getattr(message, "forward_from_chat", None), "id", None)
+    fwd_msg_id = getattr(message, "forward_from_message_id", None)
+    return Content(
+        kind=kind,
+        text=text,
+        message=message,
+        is_forward=is_fwd,
+        forward_chat_id=fwd_chat_id,
+        forward_msg_id=fwd_msg_id,
+    )
 
 
 def content_from_text(text: str) -> Content:
@@ -217,6 +244,33 @@ async def userbot_targets(client: Client, account_id: str, kind: str, force: boo
 async def _send_one(client: Client, chat_id: int, content: Content, is_bot: bool) -> tuple[bool, str]:
     """Send to a single chat. Returns (ok, reason)."""
     try:
+        # If this is a forwarded channel post, preserve the "Forwarded from Channel" header
+        if content.is_forward:
+            forwarded = False
+            if content.forward_chat_id and content.forward_msg_id:
+                try:
+                    await client.forward_messages(
+                        chat_id=chat_id,
+                        from_chat_id=content.forward_chat_id,
+                        message_ids=content.forward_msg_id,
+                    )
+                    return True, ""
+                except Exception:
+                    pass
+
+            if content.message is not None and (
+                not is_bot or getattr(content.message, "_client", None) == client
+            ):
+                try:
+                    await client.forward_messages(
+                        chat_id=chat_id,
+                        from_chat_id=content.message.chat.id,
+                        message_ids=content.message.id,
+                    )
+                    return True, ""
+                except Exception:
+                    pass
+
         if is_bot and content.message is not None and getattr(content.message, "_client", None) == client:
             await content.message.copy(chat_id=chat_id)
             return True, ""

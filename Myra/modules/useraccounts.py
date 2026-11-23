@@ -171,7 +171,10 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                 "Click **[ ➕ Add Userbot ]** below to link your Telegram account."
             )
             markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add")],
+                [
+                    InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+                    InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
+                ],
                 [InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh")],
             ])
             return text, markup
@@ -199,6 +202,9 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
 
         keyboard_rows.append([
             InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+            InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
+        ])
+        keyboard_rows.append([
             InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
         ])
 
@@ -421,9 +427,9 @@ async def useraccounts_cmd(_, m: Message):
 @Myra.on_cmd("addadmin")
 @global_scope
 async def addadmin_cmd(client: Myra, m: Message):
-    """Owner command to add an authorized admin via /addadmin <user_id/username/reply>."""
-    if not is_owner(m.from_user.id):
-        return await m.reply("❌ Only the Bot Owner can add admins.")
+    """Command to add an authorized admin via /addadmin <user_id/username/reply>."""
+    if not is_owner(m.from_user.id) and not await is_admin(m.from_user.id):
+        return await m.reply("❌ Only the Bot Owner and authorized Admins can add admins.")
 
     target_user_id = None
     target_name = ""
@@ -486,9 +492,9 @@ async def addadmin_cmd(client: Myra, m: Message):
 @Myra.on_cmd(["deladmin", "rmadmin"])
 @global_scope
 async def deladmin_cmd(client: Myra, m: Message):
-    """Owner command to remove an authorized admin via /deladmin <user_id/reply>."""
-    if not is_owner(m.from_user.id):
-        return await m.reply("❌ Only the Bot Owner can remove admins.")
+    """Command to remove an authorized admin via /deladmin <user_id/reply>."""
+    if not is_owner(m.from_user.id) and not await is_admin(m.from_user.id):
+        return await m.reply("❌ Only the Bot Owner and authorized Admins can remove admins.")
 
     target_user_id = None
     if m.reply_to_message and m.reply_to_message.from_user:
@@ -574,10 +580,10 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         await query.answer("🔄 Dashboard refreshed")
         return
 
-    # Owner Admin Management Panel
+    # Admin Management Panel
     if data == "ub_manage_admins":
-        if not is_owner(user_id):
-            return await query.answer("❌ Only Bot Owner can manage admins.", show_alert=True)
+        if not is_owner(user_id) and not await is_admin(user_id):
+            return await query.answer("❌ Only Bot Owner/Admin can manage admins.", show_alert=True)
 
         text, markup = await _build_admin_management_panel()
         try:
@@ -587,10 +593,10 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         await query.answer()
         return
 
-    # Owner: Add Admin prompt
+    # Add Admin prompt
     if data == "ub_add_admin_prompt":
-        if not is_owner(user_id):
-            return await query.answer("❌ Only Bot Owner can add admins.", show_alert=True)
+        if not is_owner(user_id) and not await is_admin(user_id):
+            return await query.answer("❌ Only Bot Owner/Admin can add admins.", show_alert=True)
 
         pending_auth[user_id] = {
             "step": "add_admin",
@@ -971,9 +977,9 @@ async def userbot_auth_messages_handler(client: Myra, m: Message):
     flow = pending_auth[user_id]
     step = flow.get("step")
 
-    # Step: Owner Add Admin interactive input
+    # Step: Add Admin interactive input
     if step == "add_admin":
-        if not is_owner(user_id):
+        if not is_owner(user_id) and not await is_admin(user_id):
             pending_auth.pop(user_id, None)
             m.continue_propagation()
             return

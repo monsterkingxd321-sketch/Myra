@@ -22,6 +22,7 @@ from Myra import LOGGER
 PUBLIC_COMMANDS = [
     BotCommand("start", "Start the bot"),
     BotCommand("clone", "Host your own bot"),
+    BotCommand("mode", "Set bot reply mode in groups (Tag Only / All / Medium)"),
 ]
 
 
