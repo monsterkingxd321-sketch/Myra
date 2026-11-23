@@ -155,6 +155,7 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
+            InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
             InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
         ])
 
@@ -175,7 +176,10 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
                     InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
                 ],
-                [InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh")],
+                [
+                    InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
+                    InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
+                ],
             ])
             return text, markup
 
@@ -205,6 +209,7 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
+            InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
             InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
         ])
 

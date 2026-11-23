@@ -414,6 +414,61 @@ async def _dm_approved(client, user, title: str) -> None:
         pass
 
 
+async def _send_unmanaged_start(client, user, chat, scope: str = None) -> None:
+    """When a join request arrives for an unmanaged group or a group without force-join:
+    1. Register the user in served users database.
+    2. Send the bot's normal start message and buttons to the user in DM.
+    3. Auto-approve the join request so the user gets into the group.
+    """
+    from Myra.database.users import add_served_user
+    from Myra.modules.helpers import build_start_buttons, start_text
+
+    try:
+        await add_served_user(user.id, scope=scope)
+    except Exception as exc:
+        LOGGER.debug(f"joinreq: failed to add served user {user.id}: {exc}")
+
+    try:
+        bot_user = getattr(client, "username", None)
+        if not bot_user:
+            me = getattr(client, "me", None)
+            bot_user = getattr(me, "username", None) if me else None
+
+        if bot_user:
+            buttons = [
+                [
+                    InlineKeyboardButton(
+                        text="Add me to your group",
+                        url=f"https://t.me/{bot_user}?startgroup=true",
+                    ),
+                    InlineKeyboardButton(text="Clone your bot", callback_data="CLONE_MENU"),
+                ],
+            ]
+        else:
+            buttons = build_start_buttons()
+
+        await client.send_message(
+            chat_id=user.id,
+            text=start_text(),
+            reply_markup=InlineKeyboardMarkup(buttons),
+            disable_web_page_preview=True,
+        )
+        LOGGER.info(f"joinreq: sent normal start message to {user.id} for group {chat.id}")
+    except (Forbidden, UserNotParticipant) as exc:
+        LOGGER.debug(f"joinreq: cannot DM {user.id} normal start — {exc}")
+    except Exception as exc:
+        LOGGER.debug(f"joinreq: error sending normal start to {user.id}: {exc}")
+
+    approved = await _approve(client, chat.id, user, scope=scope)
+    if approved:
+        try:
+            doc = await jdb.get_chat(chat.id, scope=scope)
+            if doc:
+                await jdb.bump(chat.id, "approved", 1, scope=scope)
+        except Exception:
+            pass
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Incoming request
 # ══════════════════════════════════════════════════════════════════════════
@@ -434,25 +489,29 @@ async def on_join_request(client, request: ChatJoinRequest):
     scope = current_scope()
 
     enabled = await sdb.get_setting(sdb.KEY_JOINREQ_ENABLED, scope=scope, default=False)
-    if not enabled:
-        LOGGER.debug(f"joinreq: controller is OFF — ignoring request in {chat.id}")
-        return
+    doc = await jdb.get_chat(chat.id, scope=scope) if enabled else None
 
-    doc = await jdb.get_chat(chat.id, scope=scope)
-    if not doc:
+    # Check if this group has force-join / required channels configured & active
+    all_required = []
+    has_force = False
+    if enabled and doc and doc.get("enabled"):
+        all_required = list(doc.get("required") or [])
+        if all_required:
+            has_force = True
+
+    # If no force channel or group is not managed / paused:
+    # Send normal start message to user in DM and auto-approve!
+    if not has_force:
         LOGGER.info(
-            f"joinreq: request in {chat.id} ({chat_title!r}) ignored — group is not "
-            "in the managed list"
+            f"joinreq: request user={user.id} in {chat.id} ({chat_title!r}) has no force-join or unmanaged "
+            "— sending normal start message and auto-approving"
         )
-        return
-    if not doc.get("enabled"):
-        LOGGER.info(f"joinreq: request in {chat.id} ignored — group is paused")
+        await _send_unmanaged_start(client, user, chat, scope=scope)
         return
 
     LOGGER.info(f"joinreq: request user={user.id} chat={chat.id} ({chat_title!r})")
     await jdb.bump(chat.id, "pending", 1, scope=scope)
 
-    all_required = list(doc.get("required") or [])
     required = _usable_required(all_required)          # bot-checkable chats
     manual = _manual_required(all_required)            # admin-checked links
     auto = _flag(
