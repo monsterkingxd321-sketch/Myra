@@ -154,7 +154,8 @@ def _check_group_mention_or_reply(
     # 4. Check userbot name triggers if called by name
     if not has_mention and client:
         try:
-            from Myra.modules.chatbot import _extract_name_triggers
+            from Myra.modules.chatbot import _extract_name_triggers, normalize_fancy_font
+            text_plain = normalize_fancy_font(text)
             for trigger in _extract_name_triggers(client):
                 pattern = re.compile(rf"(?<!\w){re.escape(trigger)}(?!\w)", re.IGNORECASE)
                 matches = list(pattern.finditer(text))
@@ -163,6 +164,13 @@ def _check_group_mention_or_reply(
                     for m in matches:
                         mention_spans.append(m.span())
                     break
+                if text_plain != text:
+                    matches = list(pattern.finditer(text_plain))
+                    if matches:
+                        has_mention = True
+                        for m in matches:
+                            mention_spans.append(m.span())
+                        break
         except Exception as exc:  # noqa: BLE001
             LOGGER.debug(f"Userbot name trigger check failed: {exc}")
 

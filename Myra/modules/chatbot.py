@@ -129,6 +129,31 @@ async def _send_response(client: Client, message: Message, response: dict, chanc
     )
 
 
+import unicodedata
+
+SMALL_CAPS = {
+    "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f", "ɢ": "g", "ʜ": "h",
+    "ɪ": "i", "ᴊ": "j", "ᴋ": "k", "ʟ": "l", "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p",
+    "ꞯ": "q", "ʀ": "r", "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ʏ": "y", "ᴢ": "z"
+}
+
+
+def normalize_fancy_font(text: str) -> str:
+    """
+    Convert stylized unicode fonts (bold, italic, script, gothic, small-caps,
+    fullwidth, circled, monospace, etc.) into clean standard ASCII characters.
+    """
+    if not text:
+        return ""
+    norm = unicodedata.normalize("NFKD", text)
+    res = []
+    for ch in norm:
+        ch = SMALL_CAPS.get(ch, ch)
+        if not unicodedata.combining(ch):
+            res.append(ch)
+    return "".join(res)
+
+
 def _is_bot_message(message: Message, me) -> bool:
     """True when the message replies to one of the bot's own messages."""
     replied = message.reply_to_message
@@ -142,10 +167,8 @@ def _is_bot_message(message: Message, me) -> bool:
 def _extract_name_triggers(entity) -> list[str]:
     """
     Extract trigger words and phrases from bot's display name or client.
-    Handles full name, first name, last name, and clean constituent words.
-    Example:
-      first_name = 'lauda', last_name = 'string'
-      Triggers -> ['lauda string', 'string', 'lauda']
+    Handles full name, first name, last name, clean constituent words,
+    and both fancy unicode fonts (e.g. 𝓜𝔂𝓻𝓪, 𝗠𝘆𝗿𝗮) and plain ASCII (Myra).
     """
     if not entity:
         return []
@@ -154,23 +177,38 @@ def _extract_name_triggers(entity) -> list[str]:
     first = (getattr(me, "first_name", "") or "").strip()
     last = (getattr(me, "last_name", "") or "").strip()
     full = f"{first} {last}".strip()
-
     entity_name = (getattr(entity, "name", "") or "").strip()
-    if entity_name and entity_name != full and len(entity_name) >= 2:
-        triggers.append(entity_name)
 
-    if len(full) >= 2:
-        triggers.append(full)
-    if len(first) >= 2 and first != full:
-        triggers.append(first)
-    if len(last) >= 2 and last != full:
-        triggers.append(last)
+    raw_candidates = [full, first, last, entity_name]
+    for cand in raw_candidates:
+        cand = cand.strip()
+        if len(cand) >= 2 and cand not in triggers:
+            triggers.append(cand)
+        plain = normalize_fancy_font(cand).strip()
+        if len(plain) >= 2 and plain not in triggers:
+            triggers.append(plain)
 
-    clean_full = re.sub(r"[^\w\s]", " ", f"{full} {entity_name}")
-    words = [w.strip() for w in clean_full.split() if len(w.strip()) >= 2]
-    for w in words:
-        if w.lower() not in ("bot", "the", "and") and w not in triggers:
-            triggers.append(w)
+    for sample in list(triggers):
+        clean = re.sub(r"[^\w\s]", " ", sample)
+        words = [w.strip() for w in clean.split() if len(w.strip()) >= 2]
+        for w in words:
+            if w.lower() not in ("bot", "the", "and") and w not in triggers:
+                triggers.append(w)
+            plain_w = normalize_fancy_font(w).strip()
+            if plain_w.lower() not in ("bot", "the", "and") and plain_w not in triggers and len(plain_w) >= 2:
+                triggers.append(plain_w)
+
+        letters = [w.strip() for w in clean.split() if len(w.strip()) == 1 and w.isalpha()]
+        if len(letters) >= 2 and len(letters) == len(clean.split()):
+            joined = "".join(letters)
+            if len(joined) >= 2 and joined not in triggers:
+                triggers.append(joined)
+            plain_joined = normalize_fancy_font(joined)
+            if len(plain_joined) >= 2 and plain_joined not in triggers:
+                triggers.append(plain_joined)
+
+    if "myra" not in [t.lower() for t in triggers]:
+        triggers.append("Myra")
 
     return sorted(list(dict.fromkeys(triggers)), key=lambda s: len(s), reverse=True)
 
@@ -182,6 +220,7 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
 
     The bot answers when it is @mentioned, replied to, or called by name (full or partial)
     — and the trigger is stripped so the database search sees clean text.
+    Handles both stylized unicode fonts and standard keyboard fonts.
     """
     raw = message.text or message.caption or ""
     me = getattr(client, "me", None) or client
@@ -212,6 +251,8 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
 
     # Check bot name triggers (full name, first name, last name, clean word tokens)
     name_triggers = _extract_name_triggers(client)
+    raw_plain = normalize_fancy_font(raw)
+
     for trigger in name_triggers:
         pattern = rf"(?<!\w){re.escape(trigger)}(?!\w)"
         matches = list(re.finditer(pattern, raw, re.IGNORECASE))
@@ -220,6 +261,13 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
             for m in matches:
                 spans.append(m.span())
             break
+        if raw_plain != raw:
+            norm_matches = list(re.finditer(pattern, raw_plain, re.IGNORECASE))
+            if norm_matches:
+                addressed = True
+                for m in norm_matches:
+                    spans.append(m.span())
+                break
 
     if not spans:
         return addressed, raw.strip()
@@ -227,7 +275,7 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
     chars = list(raw)
     for start, end in sorted(spans, key=lambda span: span[0], reverse=True):
         del chars[start:end]
-    cleaned = "".join(chars).strip()
+    cleaned = "".join(chars).strip().strip(" ,:!-")
     if addressed and not cleaned:
         cleaned = "hello"
     return addressed, cleaned
