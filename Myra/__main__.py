@@ -46,21 +46,40 @@ def run_flask():
 # 2️⃣ Pyrogram Bot Starter
 # ─────────────────────────────────────
 async def start_bot():
-    try:
-        await Myra.start()
-    except Exception as ex:
-        LOGGER.error(f"❌ Failed to start Myra bot: {ex}", exc_info=True)
-        raw_tok = str(config.BOT_TOKEN or "")
-        preview = f"{raw_tok[:7]}...{raw_tok[-4:]}" if len(raw_tok) > 12 else "(empty/invalid)"
-        LOGGER.error(
-            "⚠️ Bot Authorization Failed!\n"
-            "If you see 'auth.ImportBotAuthorization' TimeoutError or AccessTokenInvalid:\n"
-            " 1. Telegram requires BOTH a valid BOT_TOKEN AND a valid API_ID + API_HASH pair from https://my.telegram.org.\n"
-            " 2. If you only changed BOT_TOKEN, make sure your API_ID and API_HASH are also 100% correct and not blocked/expired.\n"
-            " 3. If your API_ID was flagged by Telegram, create a fresh app at https://my.telegram.org -> API development tools.\n"
-            f" 4. Current BOT_TOKEN preview: {preview}."
-        )
-        quit(1)
+    max_boot_attempts = 15
+    for boot_attempt in range(1, max_boot_attempts + 1):
+        try:
+            LOGGER.info(f"🚀 Starting Myra client (attempt {boot_attempt}/{max_boot_attempts})...")
+            await Myra.start()
+            LOGGER.info("✅ Myra bot client started successfully!")
+            break
+        except Exception as ex:
+            LOGGER.warning(f"⚠️ Myra.start() attempt {boot_attempt} failed: {ex}")
+            try:
+                await Myra.stop()
+            except Exception:
+                pass
+
+            if boot_attempt < max_boot_attempts:
+                backoff_wait = min(30, 5 * boot_attempt)
+                LOGGER.info(
+                    f"⏳ Telegram DC returned a temporary error ({ex}). "
+                    f"Keeping health server alive and waiting {backoff_wait}s before reconnecting..."
+                )
+                await asyncio.sleep(backoff_wait)
+            else:
+                LOGGER.error(f"❌ Failed to start Myra bot after {max_boot_attempts} attempts: {ex}", exc_info=True)
+                raw_tok = str(config.BOT_TOKEN or "")
+                preview = f"{raw_tok[:7]}...{raw_tok[-4:]}" if len(raw_tok) > 12 else "(empty/invalid)"
+                LOGGER.error(
+                    "⚠️ Bot Authorization Failed!\n"
+                    "If you see 'auth.ImportBotAuthorization' TimeoutError or AccessTokenInvalid:\n"
+                    " 1. Telegram requires BOTH a valid BOT_TOKEN AND a valid API_ID + API_HASH pair from https://my.telegram.org.\n"
+                    " 2. If you only changed BOT_TOKEN, make sure your API_ID and API_HASH are also 100% correct and not blocked/expired.\n"
+                    " 3. If your API_ID was flagged by Telegram, create a fresh app at https://my.telegram.org -> API development tools.\n"
+                    f" 4. Current BOT_TOKEN preview: {preview}."
+                )
+                quit(1)
 
     for module in ALL_MODULES:
         importlib.import_module("Myra.modules." + module)
@@ -235,6 +254,25 @@ def preflight() -> bool:
         f"🔐 Telegram Credentials: API_ID={api_id_str} · "
         f"API_HASH={api_hash_preview} (len {len(api_hash_str)}) · BOT_TOKEN={bot_tok_preview}"
     )
+
+    # Verify token with Telegram HTTP Bot API
+    try:
+        import requests
+        r = requests.get(f"https://api.telegram.org/bot{bot_tok_str}/getMe", timeout=7)
+        data = r.json()
+        if data.get("ok"):
+            bot_obj = data.get("result", {})
+            LOGGER.info(
+                f"✅ Verified Bot Token via Telegram API: @{bot_obj.get('username')} "
+                f"('{bot_obj.get('first_name')}', ID: {bot_obj.get('id')})"
+            )
+        else:
+            LOGGER.error(
+                f"❌ Telegram BotFather Token Rejected: {data.get('description', 'Unknown error')} "
+                f"(Error code: {data.get('error_code')})"
+            )
+    except Exception as exc:
+        LOGGER.warning(f"⚠️ Could not verify token via Telegram HTTP API: {exc}")
 
     if not config.OWNER_ID:
         LOGGER.warning("⚠️ OWNER_ID is not a valid user id — /admin will not open for anyone.")
