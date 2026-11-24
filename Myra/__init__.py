@@ -55,7 +55,9 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-logging.getLogger("pyrogram").setLevel(logging.ERROR)
+logging.getLogger("pyrogram").setLevel(logging.WARNING)
+logging.getLogger("pyrogram.session").setLevel(logging.INFO)
+logging.getLogger("pyrogram.connection").setLevel(logging.INFO)
 
 # Third-party SDKs log every HTTP attempt at INFO ("HTTP Request POST … 429",
 # "Retrying request …"), which looks like a wall of errors while the bot is
@@ -138,6 +140,7 @@ class Myra(Client):
             lang_code="en",
             bot_token=token or None,
             in_memory=True,
+            ipv6=False,
             parse_mode=ParseMode.DEFAULT,
         )
         self.id = None

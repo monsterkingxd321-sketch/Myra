@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 import importlib
 from threading import Thread
@@ -53,10 +54,11 @@ async def start_bot():
         preview = f"{raw_tok[:7]}...{raw_tok[-4:]}" if len(raw_tok) > 12 else "(empty/invalid)"
         LOGGER.error(
             "⚠️ Bot Authorization Failed!\n"
-            "If you see 'auth.ImportBotAuthorization' or 'AccessTokenInvalid':\n"
-            f" 1. Check your BOT_TOKEN environment variable (current preview: {preview}).\n"
-            " 2. Make sure this bot was NOT deleted or regenerated in @BotFather.\n"
-            " 3. If needed, open @BotFather -> /mybots -> API Token -> Revoke & copy the new token."
+            "If you see 'auth.ImportBotAuthorization' TimeoutError or AccessTokenInvalid:\n"
+            " 1. Telegram requires BOTH a valid BOT_TOKEN AND a valid API_ID + API_HASH pair from https://my.telegram.org.\n"
+            " 2. If you only changed BOT_TOKEN, make sure your API_ID and API_HASH are also 100% correct and not blocked/expired.\n"
+            " 3. If your API_ID was flagged by Telegram, create a fresh app at https://my.telegram.org -> API development tools.\n"
+            f" 4. Current BOT_TOKEN preview: {preview}."
         )
         quit(1)
 
@@ -184,11 +186,7 @@ async def start_bot():
 # 4️⃣ Preflight + Start Flask & the Bot together
 # ─────────────────────────────────────
 def preflight() -> bool:
-    """Fail fast with a readable message instead of a cryptic Pyrogram error.
-
-    Reads ``os.environ`` directly, so it sees both a local ``.env`` (loaded by
-    ``config`` at import time) and the host's Variables panel.
-    """
+    """Fail fast with a readable message instead of a cryptic Pyrogram error."""
     fatal = [n for n in ("API_ID", "API_HASH", "BOT_TOKEN", "OWNER_ID") if not os.environ.get(n)]
     soft = [n for n in ("MONGO_URL",) if not os.environ.get(n)]
 
@@ -201,13 +199,55 @@ def preflight() -> bool:
     if fatal:
         LOGGER.error(
             "❌ Missing required environment variable(s): " + ", ".join(fatal) +
-            "\n   ➜ On Railway/Render add them in the service's Variables tab."
+            "\n   ➜ In Koyeb/Railway/Render add them in the service's Variables tab."
             "\n   ➜ Locally put them in .env (see sample.env)."
         )
         return False
 
+    api_id_str = str(config.API_ID or "").strip()
+    api_hash_str = str(config.API_HASH or "").strip()
+    bot_tok_str = str(config.BOT_TOKEN or "").strip()
+
+    # Credential format validation to catch typos, swaps, and invalid formats
+    format_issues = []
+    if not api_id_str.isdigit() or int(api_id_str) <= 1000:
+        format_issues.append(f"API_ID '{api_id_str}' is invalid (must be your Telegram App ID number from https://my.telegram.org)")
+
+    if len(api_hash_str) != 32 or not re.match(r"^[0-9a-fA-F]{32}$", api_hash_str):
+        format_issues.append(
+            f"API_HASH length is {len(api_hash_str)} (must be exactly 32 hex characters from https://my.telegram.org). "
+            "Make sure you did not swap API_ID and API_HASH or paste a bot token here."
+        )
+
+    if ":" not in bot_tok_str:
+        format_issues.append("BOT_TOKEN is missing ':' — must be in format '123456789:ABCDefGh...' from @BotFather")
+
+    if format_issues:
+        LOGGER.error("❌ Invalid Telegram Credential Format in Environment Variables:")
+        for err in format_issues:
+            LOGGER.error(f"   ➜ {err}")
+        return False
+
+    # Log clean credential previews so user can verify what values are actually running
+    api_hash_preview = f"{api_hash_str[:4]}...{api_hash_str[-4:]}" if len(api_hash_str) >= 8 else "(too short)"
+    bot_tok_preview = f"{bot_tok_str[:7]}...{bot_tok_str[-4:]}" if len(bot_tok_str) >= 12 else "(too short)"
+    LOGGER.info(
+        f"🔐 Telegram Credentials: API_ID={api_id_str} · "
+        f"API_HASH={api_hash_preview} (len {len(api_hash_str)}) · BOT_TOKEN={bot_tok_preview}"
+    )
+
     if not config.OWNER_ID:
         LOGGER.warning("⚠️ OWNER_ID is not a valid user id — /admin will not open for anyone.")
+
+    # Remove any stale .session file to ensure completely fresh auth
+    for stale_session in ("Myra.session", "Myra.session-journal"):
+        if os.path.exists(stale_session):
+            try:
+                os.remove(stale_session)
+                LOGGER.info(f"🧹 Removed stale {stale_session}")
+            except Exception:
+                pass
+
     return True
 
 
