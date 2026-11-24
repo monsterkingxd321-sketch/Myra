@@ -116,8 +116,8 @@ def build_group_buttons() -> list:
     """Inline keyboard shown when the bot is added to / started in a group."""
     return [
         [
+            InlineKeyboardButton(text="Mode Settings", callback_data="gmode_open"),
             InlineKeyboardButton(text="Help", callback_data="HELP"),
-            InlineKeyboardButton(text="Clone your bot", callback_data="CLONE_MENU"),
         ],
     ]
 

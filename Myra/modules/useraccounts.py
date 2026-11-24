@@ -146,24 +146,24 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     user_tag = f"@{username}" if username else f"#{idx}"
                     added_by_id = acc.get("added_by", "Unknown")
                     autochat_state = in_mem.get("autochat", acc.get("autochat", True))
-                    status_icon = "🟢" if autochat_state else "🔴"
-                    btn_text = f"👤 {name} ({user_tag}) [Admin: {added_by_id}] • {status_icon}"
+                    status_sym = "[✓]" if autochat_state else "[x]"
+                    btn_text = f"{name} ({user_tag}) [Admin: {added_by_id}] • {status_sym}"
                     keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
         notify_enabled = await ai_settings.get_joinreq_notify()
-        notify_icon = "🟢 ON" if notify_enabled else "🔴 OFF"
+        notify_str = "ON" if notify_enabled else "OFF"
 
         keyboard_rows.append([
-            InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
-            InlineKeyboardButton("🗑 Remove Admin", callback_data="ub_manage_admins"),
+            InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
+            InlineKeyboardButton("Remove Admin", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
-            InlineKeyboardButton(f"🔔 Invite Notify: {notify_icon}", callback_data="ub_toggle_notify"),
-            InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
+            InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
         ])
         keyboard_rows.append([
-            InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
+            InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
+            InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),
         ])
 
         return text, InlineKeyboardMarkup(keyboard_rows)
@@ -172,34 +172,36 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
         # Admin view: Only accounts added by this admin
         my_accounts = await get_accounts_by_user(viewer_id)
         notify_enabled = await ai_settings.get_joinreq_notify()
-        notify_icon = "🟢 ON" if notify_enabled else "🔴 OFF"
+        notify_str = "ON" if notify_enabled else "OFF"
 
         if not my_accounts:
             text = (
-                "👥 **USERBOT MANAGEMENT DASHBOARD**\n\n"
-                "📦 **You have not connected any userbot account yet.**\n\n"
-                "Click **[ ➕ Add Userbot ]** below to link your Telegram account."
+                "╭───「 Userbot Dashboard 」\n"
+                "╰──────────────────────\n\n"
+                "You have not connected any userbot account yet.\n"
+                "Click [ Add Userbot ] below to link your Telegram account."
             )
             markup = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
-                    InlineKeyboardButton("🗑 Remove Admin", callback_data="ub_manage_admins"),
+                    InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
+                    InlineKeyboardButton("Remove Admin", callback_data="ub_manage_admins"),
                 ],
                 [
-                    InlineKeyboardButton(f"🔔 Invite Notify: {notify_icon}", callback_data="ub_toggle_notify"),
-                    InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+                    InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
+                    InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
                 ],
                 [
-                    InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
-                    InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
+                    InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
+                    InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),
                 ],
             ])
             return text, markup
 
         text = (
-            "👥 **YOUR USERBOT DASHBOARD**\n\n"
-            f"📦 **Your Connected Accounts:** `{len(my_accounts)}`\n\n"
-            "Select a userbot below to open its dedicated settings & controls:"
+            "╭───「 Userbot Dashboard 」\n"
+            f"│ Connected Accounts: {len(my_accounts)}\n"
+            "╰──────────────────────\n\n"
+            "Select a userbot below to open settings:"
         )
 
         keyboard_rows = []
@@ -212,22 +214,22 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             user_tag = f"@{username}" if username else f"#{index}"
 
             autochat_state = in_mem.get("autochat", acc.get("autochat", True))
-            status_icon = "🟢" if autochat_state else "🔴"
+            status_sym = "[✓]" if autochat_state else "[x]"
 
-            btn_text = f"👤 {index}. {name} ({user_tag}) • {status_icon}"
+            btn_text = f"{index}. {name} ({user_tag}) • {status_sym}"
             keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
         keyboard_rows.append([
-            InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
-            InlineKeyboardButton("🗑 Remove Admin", callback_data="ub_manage_admins"),
+            InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
+            InlineKeyboardButton("Remove Admin", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
-            InlineKeyboardButton(f"🔔 Invite Notify: {notify_icon}", callback_data="ub_toggle_notify"),
-            InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
+            InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
         ])
         keyboard_rows.append([
-            InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
+            InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
+            InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),
         ])
 
         return text, InlineKeyboardMarkup(keyboard_rows)
@@ -237,8 +239,8 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
     """Build dedicated management panel for a single userbot."""
     can_manage, acc = await _can_manage_account(viewer_id, account_id)
     if not can_manage or not acc:
-        return "❌ You are not authorized to view this userbot account.", InlineKeyboardMarkup([
-            [InlineKeyboardButton("↩️ Back to Accounts", callback_data="ub_back_main")]
+        return "Unauthorized to view this userbot account.", InlineKeyboardMarkup([
+            [InlineKeyboardButton("Back to Accounts", callback_data="ub_back_main")]
         ])
 
     in_mem = ub_accounts.get(account_id, {})
@@ -249,11 +251,11 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
     phone_masked = _mask_phone(in_mem.get("phone", acc.get("phone", "")))
 
     is_connected = account_id in ub_accounts and ub_accounts[account_id].get("status") == "CONNECTED"
-    status_str = "🟢 Connected" if is_connected else "🔴 Disconnected"
+    status_str = "Connected" if is_connected else "Disconnected"
 
     autochat_state = in_mem.get("autochat", acc.get("autochat", True))
-    autochat_label = "🟢 ON" if autochat_state else "🔴 OFF"
-    autochat_btn_text = "🔴 Turn AutoChat OFF" if autochat_state else "🟢 Turn AutoChat ON"
+    autochat_label = "ON" if autochat_state else "OFF"
+    autochat_btn_text = "Turn AutoChat OFF" if autochat_state else "Turn AutoChat ON"
 
     delay = in_mem.get("reply_delay", acc.get("reply_delay", 0))
     speed_mode = in_mem.get("speed_mode", acc.get("speed_mode", "fast"))
@@ -262,55 +264,56 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
     _gm = in_mem.get("group_mode") or acc.get("group_mode") or (
         "all" if config.USERBOT_GROUP_REPLY_ALL else "mention"
     )
-    group_label = "All messages 💬" if _gm == "all" else "Only when tagged 👤"
+    group_label = "All messages" if _gm == "all" else "Only when tagged"
     _chance = in_mem.get("reply_chance", acc.get("reply_chance"))
     chance_label = "Global" if _chance is None else f"{float(_chance):g}%"
 
     _scope = in_mem.get("reply_scope") or acc.get("reply_scope") or "both"
     scope_label_map = {
-        "both": "Both (Groups & DMs) 🌐",
-        "groups": "Groups Only 👥",
-        "private": "DMs Only ✉️",
+        "both": "Both (Groups & DMs)",
+        "groups": "Groups Only",
+        "private": "DMs Only",
     }
-    scope_label = scope_label_map.get(_scope, "Both 🌐")
+    scope_label = scope_label_map.get(_scope, "Both")
 
     added_by = acc.get("added_by")
     owner_id = owner_id_sync()
     if added_by and owner_id and int(added_by) == owner_id:
-        creator_str = "👑 Owner"
+        creator_str = "Owner"
     elif added_by:
-        creator_str = f"👤 Admin (`{added_by}`)"
+        creator_str = f"Admin ({added_by})"
     else:
-        creator_str = "👑 Owner"
+        creator_str = "Owner"
 
     panel_text = (
-        f"👤 **Userbot Panel: {name}**\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 **ID:** `{telegram_id}`\n"
-        f"👤 **Username:** {username_str}\n"
-        f"📱 **Phone:** `{phone_masked}`\n"
-        f"🛡 **Added By:** {creator_str}\n"
-        f"📊 **Connection:** {status_str}\n"
-        f"🤖 **AutoChat:** {autochat_label}\n"
-        f"⚡ **Reply Speed:** {speed_label}\n"
-        f"🌐 **Reply In:** {scope_label}\n"
-        f"💬 **Group Reply:** {group_label}\n"
-        f"🎲 **Reply Chance:** {chance_label}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+        f"╭───「 Userbot: {name} 」\n"
+        f"│ ID: {telegram_id}\n"
+        f"│ Username: {username_str}\n"
+        f"│ Phone: {phone_masked}\n"
+        f"│ Added By: {creator_str}\n"
+        f"│ Connection: {status_str}\n"
+        f"│ AutoChat: {autochat_label}\n"
+        f"│ Reply Speed: {speed_label}\n"
+        f"│ Reply In: {scope_label}\n"
+        f"│ Group Reply: {group_label}\n"
+        f"│ Reply Chance: {chance_label}\n"
+        f"╰──────────────────────"
     )
 
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton(autochat_btn_text, callback_data=f"ub_toggle:{account_id}")],
         [
-            InlineKeyboardButton("⚡ Speed Settings", callback_data=f"ub_speed:{account_id}"),
-            InlineKeyboardButton("🔄 Restart", callback_data=f"ub_restart:{account_id}"),
+            InlineKeyboardButton("Speed Settings", callback_data=f"ub_speed:{account_id}"),
+            InlineKeyboardButton("Restart", callback_data=f"ub_restart:{account_id}"),
         ],
         [
-            InlineKeyboardButton("ℹ️ Info", callback_data=f"ub_info:{account_id}"),
-            InlineKeyboardButton("🗑 Remove", callback_data=f"ub_remove:{account_id}"),
+            InlineKeyboardButton("Info", callback_data=f"ub_info:{account_id}"),
+            InlineKeyboardButton("Remove", callback_data=f"ub_remove:{account_id}"),
         ],
-        [InlineKeyboardButton("↩️ Back to Accounts List", callback_data="ub_back_main")],
+        [InlineKeyboardButton("Back to Accounts List", callback_data="ub_back_main")],
     ])
+
+    return panel_text, markup
 
     return panel_text, markup
 
@@ -374,17 +377,17 @@ async def _build_speed_menu(account_id: str, viewer_id: int) -> tuple[str, Inlin
             InlineKeyboardButton("⏱ Medium (5s)", callback_data=f"ub_setspeed:{account_id}:medium"),
         ],
         [
-            InlineKeyboardButton("🐢 Slow (10s)", callback_data=f"ub_setspeed:{account_id}:slow"),
-            InlineKeyboardButton("⚙️ Custom Delay", callback_data=f"ub_setspeed:{account_id}:custom"),
+            InlineKeyboardButton("Slow (10s)", callback_data=f"ub_setspeed:{account_id}:slow"),
+            InlineKeyboardButton("Custom Delay", callback_data=f"ub_setspeed:{account_id}:custom"),
         ],
         [
-            InlineKeyboardButton(f"🌐 Reply In: {_scope.title()}", callback_data=f"ub_scope:{account_id}"),
-            InlineKeyboardButton("💬 Group Mode", callback_data=f"ub_gmode:{account_id}"),
+            InlineKeyboardButton(f"Reply In: {_scope.title()}", callback_data=f"ub_scope:{account_id}"),
+            InlineKeyboardButton("Group Mode", callback_data=f"ub_gmode:{account_id}"),
         ],
         [
-            InlineKeyboardButton("🎲 Reply Chance", callback_data=f"ub_chance:{account_id}"),
+            InlineKeyboardButton("Reply Chance", callback_data=f"ub_chance:{account_id}"),
         ],
-        [InlineKeyboardButton(f"↩️ Back to {name}", callback_data=f"ub_panel:{account_id}")],
+        [InlineKeyboardButton(f"Back to {name}", callback_data=f"ub_panel:{account_id}")],
     ])
 
     return speed_text, markup
@@ -395,35 +398,34 @@ async def _build_admin_management_panel() -> tuple[str, InlineKeyboardMarkup]:
     admins_list = await get_admins()
 
     text = (
-        "👑 **BOT ADMIN MANAGEMENT**\n\n"
-        "Admins added here can use `/useraccounts` to add and manage their own userbots.\n"
-        "Admins will **NOT** see your accounts, but you will have full control over all accounts.\n\n"
-        f"🛡 **Current Admins:** `{len(admins_list)}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "╭───「 Bot Admin Management 」\n"
+        f"│ Authorized Admins: {len(admins_list)}\n"
+        "╰──────────────────────\n\n"
+        "Admins added here can use /useraccounts to add and manage their own userbots.\n\n"
     )
 
     keyboard_rows = []
 
     if not admins_list:
-        text += "ℹ️ *No admins added yet.*\nClick **[ ➕ Add Admin ]** to authorize a user."
+        text += "No admins added yet.\nClick [ Add Admin ] to authorize a user."
     else:
         for idx, adm in enumerate(admins_list, 1):
             adm_id = adm["user_id"]
             adm_name = adm.get("name", "Admin")
             adm_user = adm.get("username", "")
-            user_tag = f"@{adm_user}" if adm_user else f"ID: `{adm_id}`"
-            text += f"{idx}. 👤 **{adm_name}** ({user_tag})\n"
+            user_tag = f"@{adm_user}" if adm_user else f"ID: {adm_id}"
+            text += f"{idx}. {adm_name} ({user_tag})\n"
             keyboard_rows.append([
-                InlineKeyboardButton(f"👤 {adm_name} ({adm_id})", callback_data="ub_noop"),
-                InlineKeyboardButton("🗑 Remove", callback_data=f"ub_deladmin_btn:{adm_id}"),
+                InlineKeyboardButton(f"{adm_name} ({adm_id})", callback_data="ub_noop"),
+                InlineKeyboardButton("Remove", callback_data=f"ub_deladmin_btn:{adm_id}"),
             ])
 
     keyboard_rows.append([
-        InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
-        InlineKeyboardButton("🔄 Refresh", callback_data="ub_manage_admins"),
+        InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
+        InlineKeyboardButton("Refresh", callback_data="ub_manage_admins"),
     ])
     keyboard_rows.append([
-        InlineKeyboardButton("↩️ Back to Accounts", callback_data="ub_back_main"),
+        InlineKeyboardButton("Back to Accounts", callback_data="ub_back_main"),
     ])
 
     return text, InlineKeyboardMarkup(keyboard_rows)

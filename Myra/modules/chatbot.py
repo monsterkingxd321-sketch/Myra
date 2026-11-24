@@ -258,41 +258,41 @@ async def chatbot_group(client: Client, message: Message):
 
 
 async def _build_group_mode_panel(chat_id: int, chat_title: str) -> tuple[str, InlineKeyboardMarkup]:
+    """Build mode selection menu for group chats."""
     current_mode = await get_group_reply_mode(chat_id)
 
     modes_map = {
-        "tag_only": "🏷 Tag & Reply Only (Default)",
-        "all": "💬 All Messages",
-        "medium": "⚡ Medium (Balanced)",
+        "tag_only": "Tag & Reply Only (Default)",
+        "all": "All Messages",
+        "medium": "Medium (Balanced)",
     }
-    current_label = modes_map.get(current_mode, "🏷 Tag & Reply Only (Default)")
+    current_label = modes_map.get(current_mode, "Tag & Reply Only (Default)")
 
     text = (
-        "⚙️ **GROUP BOT REPLY MODE**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 **Group:** `{chat_title}`\n"
-        f"🎯 **Active Mode:** `{current_label}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Select how the bot & cloned bots should reply in this group:\n\n"
-        "🏷 **Tag & Reply Only** *(Default)*\n"
-        "↳ Sirf tab reply karega jab bot ko tag (@mention ya naam) karein ya uske message par reply karein.\n\n"
-        "💬 **All Messages**\n"
-        "↳ Group ke har message ka reply karega.\n\n"
-        "⚡ **Medium (Balanced)**\n"
-        "↳ Tag & reply par 100% reply + baaki messages par beech-beech me partial reply.\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔒 *Only group admins can change this setting.*"
+        "╭───「 Reply Mode Settings 」\n"
+        f"│ Group: {chat_title}\n"
+        f"│ Active: {current_label}\n"
+        "╰──────────────────────\n\n"
+        "Select replying mode for this group:\n\n"
+        "• Tag & Reply Only (Default)\n"
+        "  Replies only when tagged (@mention or name) or replied to.\n\n"
+        "• All Messages\n"
+        "  Replies to every message in group.\n\n"
+        "• Medium (Balanced)\n"
+        "  Replies to tags and replies, plus occasional group messages.\n\n"
+        "──────────────────────\n"
+        "Restricted to group admins."
     )
 
     def _btn(code: str, label: str):
-        tick = "✅ " if current_mode == code else ""
+        tick = "✓ " if current_mode == code else ""
         return InlineKeyboardButton(f"{tick}{label}", callback_data=f"gmode:{chat_id}:{code}")
 
     markup = InlineKeyboardMarkup([
-        [_btn("tag_only", "🏷 Tag & Reply Only")],
-        [_btn("all", "💬 All Messages")],
-        [_btn("medium", "⚡ Medium (Balanced)")],
-        [InlineKeyboardButton("❌ Close", callback_data=f"gmode:{chat_id}:close")],
+        [_btn("tag_only", "Tag & Reply Only")],
+        [_btn("all", "All Messages")],
+        [_btn("medium", "Medium (Balanced)")],
+        [InlineKeyboardButton("Close", callback_data=f"gmode:{chat_id}:close")],
     ])
     return text, markup
 
@@ -302,8 +302,8 @@ async def mode_cmd(client: Client, m: Message):
     """Set group reply mode (Tag Only / All Messages / Medium)."""
     if m.chat.type == ChatType.PRIVATE:
         return await m.reply_text(
-            "❌ **This command can only be used in groups.**\n\n"
-            "ℹ️ Bot ko kisi group me add karein aur waha `/mode` bhej kar group replying settings select karein."
+            "This command can only be used in groups.\n\n"
+            "Add the bot to a group and send /mode there to configure reply settings."
         )
 
     user_id = m.from_user.id if m.from_user else None
@@ -320,20 +320,23 @@ async def mode_cmd(client: Client, m: Message):
                 pass
 
         if not is_grp_admin:
-            return await m.reply_text("❌ Only group admins can change the bot reply mode.")
+            return await m.reply_text("Only group admins can change the bot reply mode.")
 
     text, markup = await _build_group_mode_panel(m.chat.id, m.chat.title or "Group")
     await m.reply_text(text, reply_markup=markup)
 
 
-@Myra.on_callback_query(filters.regex(r"^gmode:"))
+@Myra.on_callback_query(filters.regex(r"^(gmode:|gmode_open)"))
 async def group_mode_callback(client: Client, query: CallbackQuery):
-    parts = (query.data or "").split(":")
-    if len(parts) < 3:
-        return await query.answer()
-
-    _, chat_id_str, action = parts
-    chat_id = int(chat_id_str)
+    if query.data == "gmode_open":
+        chat_id = query.message.chat.id
+        action = "open"
+    else:
+        parts = (query.data or "").split(":")
+        if len(parts) < 3:
+            return await query.answer()
+        _, chat_id_str, action = parts
+        chat_id = int(chat_id_str)
 
     if action == "close":
         try:
@@ -355,9 +358,9 @@ async def group_mode_callback(client: Client, query: CallbackQuery):
             pass
 
     if not is_grp_admin:
-        return await query.answer("❌ Only group admins can change this setting.", show_alert=True)
+        return await query.answer("Only group admins can change this setting.", show_alert=True)
 
-    if action == "open_from_welcome":
+    if action in ("open", "open_from_welcome"):
         text, markup = await _build_group_mode_panel(
             chat_id,
             query.message.chat.title if query.message and query.message.chat else "Group",
@@ -378,7 +381,7 @@ async def group_mode_callback(client: Client, query: CallbackQuery):
             await query.message.edit_text(text, reply_markup=markup)
         except Exception:
             pass
-        return await query.answer(f"✅ Mode set to {action}!", show_alert=False)
+        return await query.answer(f"✓ Mode set to {action}", show_alert=False)
 
 
 @Myra.on_message(

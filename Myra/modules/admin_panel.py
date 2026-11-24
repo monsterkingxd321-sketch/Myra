@@ -74,7 +74,7 @@ async def _safe(coro, default=None):
         LOGGER.debug(f"admin panel query failed: {exc}")
         return default
 
-SPEED_PRESETS = ((0, "⚡ 0s"), (5000, "⏱ 5s"), (10000, "🐢 10s"), (30000, "🕐 30s"))
+SPEED_PRESETS = ((0, "0s (Fast)"), (5000, "5s"), (10000, "10s"), (30000, "30s"))
 INTERVAL_PRESETS = (60, 300, 900, 1800, 3600, 10800, 21600)
 
 
@@ -104,7 +104,7 @@ def _interval_label(seconds: int) -> str:
 
 
 def _back(target="ad_main"):
-    return InlineKeyboardButton("↩️ Back", callback_data=target)
+    return InlineKeyboardButton("Back", callback_data=target)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -154,53 +154,52 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
     clones = len(clones_list)
 
     text = (
-        "👑 **MYRA MASTER ADMIN PANEL** 👑\n"
-        "✦ ═════════════════════════ ✦\n"
-        f"🤖 **Bot Profile:** {_bot_title()}\n"
-        f"👑 **Owner ID:** `{owner_str}` │ 🛡 **Admins:** `{len(admins_list)}`\n"
-        "✦ ═════════════════════════ ✦\n\n"
-        "🌐 **AUDIENCE & REACH**\n"
-        f"  ├ 💬 **Served Groups:** `{chats:,}`\n"
-        f"  ├ ✉️ **Private DMs:** `{users:,}`\n"
-        f"  └ 👥 **Userbots Active:** `{len(my_accounts)}` *(DMs: `{totals.get('userbot_dm', 0):,}`)*\n\n"
-        "🧠 **BRAIN & AI INFRASTRUCTURE**\n"
-        f"  ├ ⚡ **Mode:** `{'Hybrid (DB + Gemini/GPT)' if ai.get('active') else 'Offline (DB Brain)'}`\n"
-        f"  ├ 🔑 **API Key Pool:** `{ai.get('active', 0)}/{ai.get('total', 0)} active`\n"
-        f"  └ 📚 **Trained Memory:** `{db.get('total', 0):,}` pairs\n\n"
-        "⚡ **LIVE AUTOMATION CHANNELS**\n"
-        f"  ├ 🤖 **Main Bot AutoChat:** `{'🟢 Active' if bot_auto else '🔴 Paused'}` ({ac.human_interval(bot_interval)})\n"
-        f"  └ 👥 **Userbot AutoChat:** `{'🟢 Active' if ub_auto else '🔴 Paused'}` ({ac.human_interval(ub_interval)})\n"
-        "✦ ═════════════════════════ ✦\n"
-        "✨ *Select a management module below:*"
+        "╭───「 Master Admin Panel 」\n"
+        f"│ Bot: {_bot_title()}\n"
+        f"│ Owner: {owner_str} │ Admins: {len(admins_list)}\n"
+        "╰──────────────────────\n\n"
+        "Audience & Reach\n"
+        f"• Groups: {chats:,}\n"
+        f"• Private DMs: {users:,}\n"
+        f"• Userbots Active: {len(my_accounts)} (DMs: {totals.get('userbot_dm', 0):,})\n\n"
+        "AI & Database\n"
+        f"• Mode: {'Hybrid (DB + Gemini/GPT)' if ai.get('active') else 'Offline (DB Brain)'}\n"
+        f"• API Key Pool: {ai.get('active', 0)}/{ai.get('total', 0)} active\n"
+        f"• Trained Memory: {db.get('total', 0):,} pairs\n\n"
+        "Live Automation\n"
+        f"• Bot AutoChat: {'Active' if bot_auto else 'Paused'} ({ac.human_interval(bot_interval)})\n"
+        f"• Userbot AutoChat: {'Active' if ub_auto else 'Paused'} ({ac.human_interval(ub_interval)})\n"
+        "──────────────────────\n"
+        "Select a module below:"
     )
 
     rows = [
         [
-            InlineKeyboardButton("📢 Broadcast Hub", callback_data="ad_bc"),
-            InlineKeyboardButton("⏰ AutoChat Hub", callback_data="ad_ac"),
+            InlineKeyboardButton("Broadcast Hub", callback_data="ad_bc"),
+            InlineKeyboardButton("AutoChat Hub", callback_data="ad_ac"),
         ],
         [
-            InlineKeyboardButton(f"👑 Admins ({len(admins_list)})", callback_data="ad_admins"),
-            InlineKeyboardButton("🚪 Group Requests", callback_data="ad_jr"),
+            InlineKeyboardButton(f"Admins ({len(admins_list)})", callback_data="ad_admins"),
+            InlineKeyboardButton("Group Requests", callback_data="ad_jr"),
         ],
         [
-            InlineKeyboardButton("👥 Userbots Pool", callback_data="ad_userbots"),
-            InlineKeyboardButton("📁 Import Sessions", callback_data="ad_import"),
+            InlineKeyboardButton("Userbots Pool", callback_data="ad_userbots"),
+            InlineKeyboardButton("Import Sessions", callback_data="ad_import"),
         ],
         [
-            InlineKeyboardButton("🧠 AI & API Keys", callback_data="ad_ai"),
-            InlineKeyboardButton("🎛 Reply Behaviour", callback_data="ad_behaviour"),
+            InlineKeyboardButton("AI & API Keys", callback_data="ad_ai"),
+            InlineKeyboardButton("Reply Behaviour", callback_data="ad_behaviour"),
         ],
         [
-            InlineKeyboardButton(f"🧬 Clones ({clones})", callback_data="ad_clones"),
-            InlineKeyboardButton("📊 System Stats", callback_data="ad_stats"),
+            InlineKeyboardButton(f"Clones ({clones})", callback_data="ad_clones"),
+            InlineKeyboardButton("System Stats", callback_data="ad_stats"),
         ],
         [
-            InlineKeyboardButton("🧹 Clean Database", callback_data="ad_clean"),
-            InlineKeyboardButton("🔄 Refresh Panel", callback_data="ad_main"),
+            InlineKeyboardButton("Clean Database", callback_data="ad_clean"),
+            InlineKeyboardButton("Refresh", callback_data="ad_main"),
         ],
         [
-            InlineKeyboardButton("❌ Close Panel", callback_data="ad_close"),
+            InlineKeyboardButton("Close", callback_data="ad_close"),
         ],
     ]
     return text, InlineKeyboardMarkup(rows)
@@ -212,35 +211,36 @@ async def _admins_panel() -> tuple[str, InlineKeyboardMarkup]:
     owner_id = int(config.OWNER_ID) if config.OWNER_ID else None
 
     lines = [
-        "👑 **BOT ADMIN MANAGEMENT**",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-        f"👑 **Owner ID:** `{owner_id or 'Not set'}`",
-        f"🛡 **Authorized Admins:** `{len(admins)}`",
-        "━━━━━━━━━━━━━━━━━━━━━━",
+        "╭───「 Bot Admin Management 」",
+        f"│ Owner ID: {owner_id or 'Not set'}",
+        f"│ Authorized Admins: {len(admins)}",
+        "╰──────────────────────",
+        "",
     ]
     if not admins:
-        lines.append("ℹ️ *Abhi koi extra admin added nahi hai.*")
+        lines.append("No additional admins configured.")
     else:
         for idx, adm in enumerate(admins, 1):
             aid = adm["user_id"]
             name = adm.get("name") or "Admin"
-            user = f"@{adm.get('username')}" if adm.get("username") else f"ID: `{aid}`"
-            lines.append(f"{idx}. 👤 **{name}** ({user})")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("➕ Click **Add Admin** to authorize a user via ID or @username.")
+            user = f"@{adm.get('username')}" if adm.get("username") else f"ID: {aid}"
+            lines.append(f"{idx}. {name} ({user})")
+    lines.append("")
+    lines.append("──────────────────────")
+    lines.append("Click 'Add Admin' to authorize a user via ID or @username.")
 
     rows = []
     for adm in admins[:12]:
         aid = adm["user_id"]
         name = adm.get("name") or str(aid)
         rows.append([
-            InlineKeyboardButton(f"👤 {name} ({aid})", callback_data="ad_noop"),
-            InlineKeyboardButton("🗑 Remove", callback_data=f"ad_admin_del:{aid}"),
+            InlineKeyboardButton(f"{name} ({aid})", callback_data="ad_noop"),
+            InlineKeyboardButton("Remove", callback_data=f"ad_admin_del:{aid}"),
         ])
 
     rows.append([
-        InlineKeyboardButton("➕ Add Admin", callback_data="ad_admin_add"),
-        InlineKeyboardButton("🔄 Refresh", callback_data="ad_admins"),
+        InlineKeyboardButton("Add Admin", callback_data="ad_admin_add"),
+        InlineKeyboardButton("Refresh", callback_data="ad_admins"),
     ])
     rows.append([_back()])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
@@ -252,98 +252,93 @@ async def _broadcast_sender_panel() -> tuple[str, InlineKeyboardMarkup]:
     bot_name = bot_info().get("name") or "Main Bot"
     clones_count = len([c for c in CLIENTS.values() if c is not None])
 
-    rows = [[InlineKeyboardButton(f"🤖 {bot_name}", callback_data="ad_bc_s:bot")]]
+    rows = [[InlineKeyboardButton(f"{bot_name}", callback_data="ad_bc_s:bot")]]
 
     if clones_count > 0:
         rows.append([
-            InlineKeyboardButton(f"🌐 All Cloned Bots ({clones_count})", callback_data="ad_bc_s:all_clones"),
-            InlineKeyboardButton(f"🚀 All Bots ({clones_count + 1})", callback_data="ad_bc_s:all_bots"),
+            InlineKeyboardButton(f"All Cloned Bots ({clones_count})", callback_data="ad_bc_s:all_clones"),
+            InlineKeyboardButton(f"All Bots ({clones_count + 1})", callback_data="ad_bc_s:all_bots"),
         ])
     else:
-        rows.append([InlineKeyboardButton("🌐 All Cloned Bots (0 active)", callback_data="ad_noop")])
+        rows.append([InlineKeyboardButton("All Cloned Bots (0 active)", callback_data="ad_noop")])
 
     if accounts:
-        rows.append([InlineKeyboardButton("👥 All Userbots", callback_data="ad_bc_s:userbots")])
+        rows.append([InlineKeyboardButton("All Userbots", callback_data="ad_bc_s:userbots")])
         for account_id, data in list(accounts.items())[:12]:
             name = data.get("name") or account_id
-            status = "🟢" if data.get("status") == "CONNECTED" else "🔴"
+            status = "[✓]" if data.get("status") == "CONNECTED" else "[x]"
             rows.append([
                 InlineKeyboardButton(f"{status} {name}", callback_data=f"ad_bc_s:{account_id}")
             ])
     else:
-        rows.append([InlineKeyboardButton("👥 All Userbots (none connected)", callback_data="ad_noop")])
+        rows.append([InlineKeyboardButton("All Userbots (none connected)", callback_data="ad_noop")])
 
     rows.append([_back()])
     text = (
-        "📢 **BROADCAST — STEP 1/3**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "**Kis se bhejna hai?** Choose the sender:\n\n"
-        f"🤖 **{bot_name}** — current bot ke naam se\n"
-        f"🌐 **All Cloned Bots** — sabhi active cloned bots ek sath\n"
-        f"🚀 **All Bots** — main bot aur sabhi cloned bots ek sath\n"
-        "👥 **All Userbots** — sabhi connected userbot mil kar "
-        "(targets round-robin me bat jaate hain)\n"
-        "👤 **Single Userbot** — sirf usi account se\n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
+        "╭───「 Broadcast (Step 1/3) 」\n"
+        "│ Choose the sender:\n"
+        "╰──────────────────────\n\n"
+        f"• {bot_name} - Current bot\n"
+        "• All Cloned Bots - All active clones together\n"
+        "• All Bots - Main bot and all clones together\n"
+        "• All Userbots - All connected userbots\n"
+        "• Single Userbot - Send from specific account"
     )
     return text, InlineKeyboardMarkup(rows)
 
 
 async def _broadcast_target_panel(sender: str) -> tuple[str, InlineKeyboardMarkup]:
     if sender == "bot":
-        label = f"🤖 {bot_info().get('name') or 'Main Bot'}"
+        label = f"{bot_info().get('name') or 'Main Bot'}"
     elif sender in ("all_clones", "clones"):
-        label = "🌐 All Cloned Bots"
+        label = "All Cloned Bots"
     elif sender in ("all_bots", "main_and_clones"):
-        label = "🚀 All Bots (Main + Clones)"
+        label = "All Bots (Main + Clones)"
     elif sender == "userbots":
-        label = "👥 All Userbots"
+        label = "All Userbots"
     else:
         account = ub_accounts.get(sender, {})
-        label = f"👤 {account.get('name') or sender}"
+        label = f"{account.get('name') or sender}"
 
     text = (
-        "📢 **BROADCAST — STEP 2/3**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📤 **Sender:** {label}\n\n"
-        "**Kaha bhejna hai?** Choose the target:\n\n"
-        "💬 **Groups only** — bot/userbot jin groups me hai\n"
-        "✉️ **DMs only** — jin users ne chat ki hai / dialogs me hain\n"
-        "🌐 **Groups + DMs** — dono\n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
+        "╭───「 Broadcast (Step 2/3) 」\n"
+        f"│ Sender: {label}\n"
+        "╰──────────────────────\n\n"
+        "Choose target audience:\n\n"
+        "• Groups only - Served groups\n"
+        "• DMs only - Private users\n"
+        "• Groups + DMs - Both"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Groups only", callback_data=f"ad_bc_t:{sender}:groups")],
-        [InlineKeyboardButton("✉️ DMs only", callback_data=f"ad_bc_t:{sender}:dm")],
-        [InlineKeyboardButton("🌐 Groups + DMs", callback_data=f"ad_bc_t:{sender}:both")],
+        [InlineKeyboardButton("Groups only", callback_data=f"ad_bc_t:{sender}:groups")],
+        [InlineKeyboardButton("DMs only", callback_data=f"ad_bc_t:{sender}:dm")],
+        [InlineKeyboardButton("Groups + DMs", callback_data=f"ad_bc_t:{sender}:both")],
         [_back("ad_bc")],
     ])
     return text, markup
 
 
 def _broadcast_prompt(sender: str, target: str) -> tuple[str, InlineKeyboardMarkup]:
-    label = {"groups": "💬 Groups only", "dm": "✉️ DMs only", "both": "🌐 Groups + DMs"}[target]
+    label = {"groups": "Groups only", "dm": "DMs only", "both": "Groups + DMs"}[target]
     sender_labels = {
-        "bot": f"🤖 {bot_info().get('name') or 'Main Bot'}",
-        "all_clones": "🌐 All Cloned Bots",
-        "all_bots": "🚀 All Bots (Main + Clones)",
-        "userbots": "👥 All Userbots",
+        "bot": f"{bot_info().get('name') or 'Main Bot'}",
+        "all_clones": "All Cloned Bots",
+        "all_bots": "All Bots (Main + Clones)",
+        "userbots": "All Userbots",
     }
-    sender_display = sender_labels.get(sender, f"👤 {sender}")
+    sender_display = sender_labels.get(sender, str(sender))
     text = (
-        "📢 **BROADCAST — STEP 3/3**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📤 **Sender:** {sender_display}\n"
-        f"🎯 **Target:** {label}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "**Ab message bhejo** — jo text bhejoge wahi broadcast hoga.\n\n"
-        "• Text message → wahi text jaayega\n"
-        "• Kisi message ko **reply** karke bhejo → media + caption jaayega\n"
-        "• Cancel karne ke liye neeche button dabao ya `/cancel` bhejo\n\n"
-        "⏳ *Broadcast shuru hone ke baad ek Stop button milega.*"
+        "╭───「 Broadcast (Step 3/3) 」\n"
+        f"│ Sender: {sender_display}\n"
+        f"│ Target: {label}\n"
+        "╰──────────────────────\n\n"
+        "Send message now to broadcast:\n\n"
+        "• Send text message or forward a channel post\n"
+        "• Reply to a media message to broadcast with media\n"
+        "• Click Cancel below or send /cancel to abort"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛑 Cancel", callback_data="ad_bc_cancel")],
+        [InlineKeyboardButton("Cancel", callback_data="ad_bc_cancel")],
     ])
     return text, markup
 
@@ -360,41 +355,29 @@ async def _autochat_panel() -> tuple[str, InlineKeyboardMarkup]:
     status = autochat_service.status()
 
     text = (
-        "⏰ **AUTOCHAT — TIME-TO-TIME MESSAGES**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Bot aur userbots apne-apne timing par khud messages bhejte rahenge "
-        "(groups / DMs), ekdum insaan jaise.\n\n"
-        f"🤖 **Main Bot:** {'🟢 ON' if bot_on else '🔴 OFF'}\n"
-        f"   ↳ har `{ac.human_interval(bot_interval)}`"
-        f" · {ac.label_for_target(bot_targets)}\n"
-        f"👥 **All Userbots:** {'🟢 ON' if ub_on else '🔴 OFF'}\n"
-        f"   ↳ har `{ac.human_interval(ub_interval)}`"
-        f" · {ac.label_for_target(ub_targets)}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📨 **Messages sent:** `{status.get('sent_total', 0)}`"
-        f" · ❌ failed `{status.get('failed_total', 0)}`\n"
-        f"🐾 **Next bot message in:** `{status.get('bot_next_in', 0)}s`\n"
-        + (f"⏳ **Last flood-wait:** `{status.get('last_flood_wait')}s`\n"
-           if status.get("last_flood_wait") else "")
-        + "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "ℹ️ Message ka text trained database se random uthaya jaata hai "
-        "(girl voice me), taaki natural lage."
+        "╭───「 AutoChat Settings 」\n"
+        f"│ Bot: {'Active' if bot_on else 'Paused'} ({ac.human_interval(bot_interval)})\n"
+        f"│ Userbots: {'Active' if ub_on else 'Paused'} ({ac.human_interval(ub_interval)})\n"
+        "╰──────────────────────\n\n"
+        f"• Messages sent: {status.get('sent_total', 0)}\n"
+        f"• Failed: {status.get('failed_total', 0)}\n"
+        f"• Next bot message in: {status.get('bot_next_in', 0)}s"
     )
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🤖 Bot Settings", callback_data="ad_ac_bot"),
-            InlineKeyboardButton("👥 Userbot Settings", callback_data="ad_ac_ub"),
+            InlineKeyboardButton("Bot Settings", callback_data="ad_ac_bot"),
+            InlineKeyboardButton("Userbot Settings", callback_data="ad_ac_ub"),
         ],
         [
-            InlineKeyboardButton("⚡ Every 1m", callback_data="ad_ac_preset:900"),
-            InlineKeyboardButton("🕐 Every 15m", callback_data="ad_ac_preset:900000"),
+            InlineKeyboardButton("Every 1m", callback_data="ad_ac_preset:900"),
+            InlineKeyboardButton("Every 15m", callback_data="ad_ac_preset:900000"),
         ],
         [
-            InlineKeyboardButton("▶️ Send now (bot)", callback_data="ad_ac_now:bot"),
-            InlineKeyboardButton("▶️ Send now (userbots)", callback_data="ad_ac_now:ub"),
+            InlineKeyboardButton("Send now (bot)", callback_data="ad_ac_now:bot"),
+            InlineKeyboardButton("Send now (userbots)", callback_data="ad_ac_now:ub"),
         ],
         [
-            InlineKeyboardButton("🔄 Refresh", callback_data="ad_ac"),
+            InlineKeyboardButton("Refresh", callback_data="ad_ac"),
             _back(),
         ],
     ])
@@ -408,16 +391,16 @@ async def _autochat_side_panel(scope: str) -> tuple[str, InlineKeyboardMarkup]:
             _safe(ac.get_bot_interval(), 0),
             _safe(ac.get_bot_targets(), "both"),
         )
-        title = f"🤖 AUTOCHAT — {bot_info().get('name') or 'MAIN BOT'}"
-        note = "Bot sirf unhi groups/DMs me bhejega jaha wo already hai."
+        title = f"AutoChat - {bot_info().get('name') or 'Main Bot'}"
+        note = "Bot only messages chats where it is already a member."
     else:
         enabled, interval, targets = await asyncio.gather(
             _safe(ac.get_ub_enabled(), False),
             _safe(ac.get_ub_interval(), 0),
             _safe(ac.get_ub_targets(), "both"),
         )
-        title = "👥 AUTOCHAT — ALL USERBOTS"
-        note = "Ye global setting hai — saare userbots par lagegi (jo connected hain)."
+        title = "AutoChat - All Userbots"
+        note = "Global setting applied to all connected userbots."
 
     overrides = 0
     if scope == "ub":
@@ -425,21 +408,19 @@ async def _autochat_side_panel(scope: str) -> tuple[str, InlineKeyboardMarkup]:
             if data.get("auto_interval_ms") is not None or data.get("auto_enabled") is not None:
                 overrides += 1
     if scope == "ub" and overrides:
-        note += f"\n⚠️ `{overrides}` account(s) have their own interval/state."
+        note += f"\nNote: {overrides} account(s) have per-userbot overrides."
 
     text = (
-        f"⏰ **{title}**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔌 **Status:** {'🟢 ON' if enabled else '🔴 OFF'}\n"
-        f"⏱ **Interval:** `{ac.human_interval(interval)}` ({interval} ms)\n"
-        f"🎯 **Targets:** {ac.label_for_target(targets)}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{note}\n\n"
-        "**Interval** = average gap (har message ke beech ±40% jitter hota hai).\n"
-        "**Targets** = kiss jagah bhejna hai."
+        f"╭───「 {title} 」\n"
+        f"│ Status: {'Active' if enabled else 'Paused'}\n"
+        f"│ Interval: {ac.human_interval(interval)} ({interval} ms)\n"
+        f"│ Targets: {ac.label_for_target(targets)}\n"
+        "╰──────────────────────\n\n"
+        f"• {note}\n"
+        "• Target: Groups, DMs, or both"
     )
 
-    toggle_text = "🔴 Turn OFF" if enabled else "🟢 Turn ON"
+    toggle_text = "Turn OFF" if enabled else "Turn ON"
     rows = [
         [InlineKeyboardButton(toggle_text, callback_data=f"ad_ac_toggle:{scope}")],
         [
@@ -453,9 +434,9 @@ async def _autochat_side_panel(scope: str) -> tuple[str, InlineKeyboardMarkup]:
         [
             InlineKeyboardButton(_interval_label(INTERVAL_PRESETS[6]),
                                  callback_data=f"ad_ac_iv:{scope}:{INTERVAL_PRESETS[6] * 1000}"),
-            InlineKeyboardButton("⚙️ Custom", callback_data=f"ad_ac_custom:{scope}"),
+            InlineKeyboardButton("Custom", callback_data=f"ad_ac_custom:{scope}"),
         ],
-        [InlineKeyboardButton(f"🎯 Target: {ac.label_for_target(targets)}",
+        [InlineKeyboardButton(f"Target: {ac.label_for_target(targets)}",
                               callback_data=f"ad_ac_tg:{scope}")],
         [_back("ad_ac")],
     ]
@@ -501,48 +482,36 @@ async def _jr_panel() -> tuple[str, InlineKeyboardMarkup]:
         preview = preview[:130] + "…"
 
     text = (
-        "🚪 **GROUP REQUEST CONTROLLER**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Jo group/channel **Ask to join** mode par hain, unki request yeh khud "
-        "handle karta hai — user ko DM card, must-join list aur **VERIFY** "
-        "button, phir seedha approve.\n\n"
-        f"🚦 **Status:** {'🟢 ON' if enabled else '🔴 OFF'}\n"
-        f"🤖 **Auto-approve:** {'✅ ON' if auto else '❌ OFF — admin approve karega'}\n"
-        f"🔔 **Join Alerts:** {'🟢 ON (Admins get DMs)' if notify else '🔴 OFF (Muted / Silent)'}\n"
-        f"   ↳ ON + 0 required link = request **turant** approve (DM/VERIFY ki "
-        f"zarurat nahi)\n"
-        f"🏘 **Managed groups:** `{len(chats)}` · 🔗 required links `{req_total}`\n"
-        f"📨 **Requests:** `{_jr_count(chats, 'pending')}`"
-        f" · ✅ verified `{_jr_count(chats, 'verified')}`"
-        f" · 🚪 approved `{_jr_count(chats, 'approved')}`"
-        f" · ❌ failed `{_jr_count(chats, 'failed')}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "✨ **Welcome card:**\n"
-        f"`{preview}`\n"
-        f"🖼 **Photo:** {'✅ set' if photo else '❌ koi nahi (text card)'}\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "ℹ️ Har managed group mein bot ko **admin** hona chahiye "
-        "(Invite users + Manage chat). Setup ke baad us group ko kholo → "
-        "🧪 **Must-join Setup → 🧪 Test** se poora flow khud check kar lo."
+        "╭───「 Group Requests Controller 」\n"
+        f"│ Status: {'Active' if enabled else 'Disabled'}\n"
+        f"│ Auto-approve: {'Enabled' if auto else 'Disabled'}\n"
+        f"│ Join Alerts: {'ON' if notify else 'OFF (Muted)'}\n"
+        f"│ Managed groups: {len(chats)} │ Required links: {req_total}\n"
+        "╰──────────────────────\n\n"
+        f"• Pending requests: {_jr_count(chats, 'pending')}\n"
+        f"• Verified: {_jr_count(chats, 'verified')}\n"
+        f"• Approved: {_jr_count(chats, 'approved')}\n"
+        f"• Failed: {_jr_count(chats, 'failed')}\n\n"
+        "Welcome Card:\n"
+        f"{preview}\n"
+        f"Photo: {'Set' if photo else 'None (text card)'}"
     )
     rows = [
         [
-            InlineKeyboardButton(f"🚦 {'🟢 ON' if enabled else '🔴 OFF'}", callback_data="ad_jr_tog"),
-            InlineKeyboardButton(f"🤖 Auto {'✅' if auto else '❌'}", callback_data="ad_jr_auto"),
+            InlineKeyboardButton(f"Status: {'ON' if enabled else 'OFF'}", callback_data="ad_jr_tog"),
+            InlineKeyboardButton(f"Auto-Approve: {'ON' if auto else 'OFF'}", callback_data="ad_jr_auto"),
         ],
         [
-            InlineKeyboardButton("➕ Add Group", callback_data="ad_jr_add"),
-            InlineKeyboardButton(f"🏘 Managed ({len(chats)})", callback_data="ad_jr_chats"),
+            InlineKeyboardButton("Add Group", callback_data="ad_jr_add"),
+            InlineKeyboardButton(f"Managed Groups ({len(chats)})", callback_data="ad_jr_chats"),
         ],
         [
-            InlineKeyboardButton("✨ Welcome Message", callback_data="ad_jr_wel"),
-            InlineKeyboardButton(
-                f"🖼 Photo {'✅' if photo else '❌'}", callback_data="ad_jr_photo"
-            ),
+            InlineKeyboardButton("Welcome Message", callback_data="ad_jr_wel"),
+            InlineKeyboardButton(f"Photo: {'Set' if photo else 'None'}", callback_data="ad_jr_photo"),
         ],
         [
-            InlineKeyboardButton(f"🔔 Alerts: {'🟢 ON' if notify else '🔴 OFF'}", callback_data="ad_jr_notify"),
-            InlineKeyboardButton("🔁 Reset Stats", callback_data="ad_jr_reset"),
+            InlineKeyboardButton(f"Alerts: {'ON' if notify else 'OFF'}", callback_data="ad_jr_notify"),
+            InlineKeyboardButton("Reset Stats", callback_data="ad_jr_reset"),
         ],
         [_back()],
     ]
@@ -764,24 +733,23 @@ async def _behaviour_panel() -> tuple[str, InlineKeyboardMarkup]:
     )
 
     scope_labels = {
-        "both": "Both (Groups & DMs) 🌐",
-        "groups": "Groups Only 👥",
-        "private": "DMs Only ✉️",
+        "both": "Both (Groups & DMs)",
+        "groups": "Groups Only",
+        "private": "DMs Only",
     }
-    scope_str = scope_labels.get(reply_scope, "Both 🌐")
+    scope_str = scope_labels.get(reply_scope, "Both")
 
     text = (
-        "🎛 **REPLY BEHAVIOUR (all userbots)**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚡ **Reply delay:** `{delay} ms` ({delay / 1000:g}s)\n"
-        f"🌐 **Reply scope:** `{scope_str}`\n"
-        f"🎲 **Group chance:** `{group_chance:g}%`\n"
-        f"✉️ **DM chance:** `{dm_chance:g}%`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Delay = reply se pehle typing indicator delay (anti-spam protection).\n"
-        "Scope = groups me, DMs me, ya dono me reply karna hai.\n"
-        "Chance = kitne % messages ka reply dena hai.\n"
-        "Per-userbot override `/useraccounts` se kar sakte ho."
+        "╭───「 Reply Behaviour (Userbots) 」\n"
+        f"│ Delay: {delay} ms ({delay / 1000:g}s)\n"
+        f"│ Scope: {scope_str}\n"
+        f"│ Group chance: {group_chance:g}%\n"
+        f"│ DM chance: {dm_chance:g}%\n"
+        "╰──────────────────────\n\n"
+        "• Delay: Typing indicator delay before reply\n"
+        "• Scope: Reply in groups, DMs, or both\n"
+        "• Chance: Reply probability percentage\n"
+        "Per-userbot override available in /useraccounts"
     )
     markup = InlineKeyboardMarkup([
         [
@@ -789,12 +757,12 @@ async def _behaviour_panel() -> tuple[str, InlineKeyboardMarkup]:
             for ms, text in SPEED_PRESETS
         ],
         [
-            InlineKeyboardButton("⚙️ Custom delay", callback_data="ad_bev_custom"),
-            InlineKeyboardButton(f"🌐 Scope: {reply_scope.title()}", callback_data="ad_bev_scope"),
+            InlineKeyboardButton("Custom Delay", callback_data="ad_bev_custom"),
+            InlineKeyboardButton(f"Scope: {reply_scope.title()}", callback_data="ad_bev_scope"),
         ],
         [
-            InlineKeyboardButton("🎲 Group chance", callback_data="ad_bev_chance:group"),
-            InlineKeyboardButton("🎲 DM chance", callback_data="ad_bev_chance:private"),
+            InlineKeyboardButton("Group Chance", callback_data="ad_bev_chance:group"),
+            InlineKeyboardButton("DM Chance", callback_data="ad_bev_chance:private"),
         ],
         [_back()],
     ])
@@ -816,27 +784,21 @@ async def _stats_panel() -> tuple[str, InlineKeyboardMarkup]:
     totals = (audience or {}).get("totals", {})
 
     text = (
-        "📊 **BOT STATISTICS**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 **Bot:** {_bot_title()}\n"
-        f"💬 **Groups:** `{chats}`\n"
-        f"✉️ **DM users — bot:** `{users}` · **userbots:** `{totals.get('userbot_dm', 0)}`\n"
-        f"👥 **Userbots connected:** `{len(_my_accounts())}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📚 **Trained replies:** `{db.get('total', 0)}`\n"
-        f"💬 **Text:** `{db.get('texts', 0)}` · 🎨 **Stickers:** `{db.get('stickers', 0)}`\n"
-        f"💾 **DB size:** `{training.human_bytes(db.get('collection_bytes', 0))}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ **AutoChat sent:** `{status.get('sent_total', 0)}`"
-        f" · failed `{status.get('failed_total', 0)}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        + userstats.render(audience)
-        + "\n━━━━━━━━━━━━━━━━━━━━━━"
+        "╭───「 Bot Statistics 」\n"
+        f"│ Bot: {_bot_title()}\n"
+        f"│ Groups: {chats}\n"
+        f"│ DMs: Bot {users} · Userbots {totals.get('userbot_dm', 0)}\n"
+        f"│ Connected Userbots: {len(_my_accounts())}\n"
+        "╰──────────────────────\n\n"
+        f"• Trained replies: {db.get('total', 0)}\n"
+        f"• Text: {db.get('texts', 0)} · Stickers: {db.get('stickers', 0)}\n"
+        f"• DB size: {training.human_bytes(db.get('collection_bytes', 0))}\n"
+        f"• AutoChat sent: {status.get('sent_total', 0)} (failed: {status.get('failed_total', 0)})"
     )
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🔄 Refresh", callback_data="ad_stats"),
-            InlineKeyboardButton("📡 Re-scan audience", callback_data="ad_stats_refresh"),
+            InlineKeyboardButton("Refresh", callback_data="ad_stats"),
+            InlineKeyboardButton("Re-scan audience", callback_data="ad_stats_refresh"),
         ],
         [_back()],
     ])
@@ -845,29 +807,24 @@ async def _stats_panel() -> tuple[str, InlineKeyboardMarkup]:
 
 def _stop_keyboard(token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛑 Stop broadcast", callback_data=f"ad_bc_stop:{token}")],
+        [InlineKeyboardButton("Stop broadcast", callback_data=f"ad_bc_stop:{token}")],
     ])
 
 
 async def _import_panel() -> tuple[str, InlineKeyboardMarkup]:
     my_accounts = _my_accounts()
     text = (
-        "📁 **IMPORT USERBOTS (.session)**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "**Pyrogram** aur **Telethon** dono ke `.session` file chalte hain — "
-        "format khud detect ho jata hai.\n\n"
-        "Bahut se accounts ek saath add karne ke liye **ZIP** bhejo "
-        "(zip ke andar sirf `.session` files).\n\n"
-        "**Kaise karein:**\n"
-        "1️⃣ Is private chat me `.session` file ya `.zip` bhej do\n"
-        "2️⃣ Bot sabko login karke userbot list me add kar dega\n"
-        "3️⃣ Uploaded message safety ke liye delete kar diya jaayega\n\n"
-        f"👥 **Abhi connected:** `{len(my_accounts)}` account(s)\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⚠️ Ek Telegram account sirf ek hi bot (main ya kisi clone) me add ho sakta hai."
+        "╭───「 Import Userbots (.session) 」\n"
+        "╰──────────────────────\n\n"
+        "Pyrogram and Telethon .session files are both supported.\n"
+        "To add multiple accounts at once, upload a ZIP file containing .session files.\n\n"
+        "Steps:\n"
+        "1. Send .session file or .zip in this private chat\n"
+        "2. The bot automatically logs them in and adds them to the pool\n"
+        f"Currently connected: {len(my_accounts)} account(s)"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👥 Userbot Dashboard", callback_data="ad_userbots")],
+        [InlineKeyboardButton("Userbot Dashboard", callback_data="ad_userbots")],
         [_back()],
     ])
     return text, markup
@@ -878,35 +835,35 @@ async def _clones_panel() -> tuple[str, InlineKeyboardMarkup]:
 
     clones = await clone_manager.list_clones()
     lines = [
-        "🧬 **CLONED BOTS**",
-        "━━━━━━━━━━━━━━━━━━━━━━",
-        "Koi bhi user `/clone <bot_token>` se apna bot host kar sakta hai. "
-        "Har clone ka apna panel, apne userbots, groups, DMs aur settings hote hain "
-        "— main bot ke admins usme access nahi kar sakte.",
+        "╭───「 Cloned Bots 」",
+        "╰──────────────────────",
+        "Users can host their own bots using /clone <bot_token>.",
+        f"Total Clones: {len(clones)}",
         "",
     ]
     if not clones:
-        lines.append("ℹ️ *Abhi koi clone nahi hai.*")
+        lines.append("No active clones.")
     for doc in clones:
-        icon = "🟢" if doc.get("running") else "🔴"
+        status_sym = "[✓]" if doc.get("running") else "[x]"
         alias = f"@{doc['username']}" if doc.get("username") else str(doc.get("bot_id"))
-        lines.append(f"{icon} **{alias}** · owner `{doc.get('owner_id')}`")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"{status_sym} {alias} · owner {doc.get('owner_id')}")
+    lines.append("──────────────────────")
 
     rows = []
     for doc in clones[:10]:
         scope = doc.get("scope")
         alias = f"@{doc['username']}" if doc.get("username") else str(doc.get("bot_id"))
+        status_action = "Stop" if doc.get('running') else "Start"
         rows.append([
             InlineKeyboardButton(
-                f"{'🛑 Stop' if doc.get('running') else '▶️ Start'} {alias}",
+                f"{status_action} {alias}",
                 callback_data=f"ad_cl_toggle:{scope}",
             ),
-            InlineKeyboardButton("🔄", callback_data=f"ad_cl_restart:{scope}"),
-            InlineKeyboardButton("🗑", callback_data=f"ad_cl_del:{scope}"),
+            InlineKeyboardButton("Restart", callback_data=f"ad_cl_restart:{scope}"),
+            InlineKeyboardButton("Delete", callback_data=f"ad_cl_del:{scope}"),
         ])
     rows.append([
-        InlineKeyboardButton("🔄 Refresh", callback_data="ad_clones"),
+        InlineKeyboardButton("Refresh", callback_data="ad_clones"),
         _back(),
     ])
     return "\n".join(lines), InlineKeyboardMarkup(rows)

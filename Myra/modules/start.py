@@ -1,8 +1,9 @@
+import time
 from pyrogram import filters
-from pyrogram.enums import ChatType
-from pyrogram.types import InlineKeyboardMarkup, Message
+from pyrogram.enums import ChatMemberStatus, ChatType
+from pyrogram.types import ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from Myra import Myra
+from Myra import LOGGER, Myra
 from Myra.database.chats import add_served_chat
 from Myra.database.users import add_served_user
 from Myra.modules.helpers import (
@@ -15,6 +16,34 @@ from Myra.modules.helpers import (
     source_text,
     start_text,
 )
+
+_welcomed_chats: dict[int, float] = {}
+
+
+async def _send_welcome_greeting(client, chat_id: int, chat_title: str):
+    """Send clean thank you and mode setup button when added to a group."""
+    now = time.time()
+    if chat_id in _welcomed_chats and (now - _welcomed_chats[chat_id] < 20):
+        return
+    _welcomed_chats[chat_id] = now
+
+    await add_served_chat(chat_id)
+    text = (
+        f"Thanks for adding me to **{chat_title}**.\n\n"
+        "Group Admins can send /mode to configure reply mode."
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Mode Settings (/mode)", callback_data=f"gmode:{chat_id}:open_from_welcome")],
+    ])
+    try:
+        await client.send_message(
+            chat_id,
+            text=text,
+            reply_markup=markup,
+            disable_web_page_preview=True,
+        )
+    except Exception as exc:
+        LOGGER.warning(f"Could not send group welcome greeting to {chat_id}: {exc}")
 
 
 async def _send_menu(
@@ -69,27 +98,34 @@ async def repo(_, m: Message):
     )
 
 
+@Myra.on_chat_member_updated()
+async def on_bot_added(client: Myra, u: ChatMemberUpdated):
+    """Triggered when bot is added to a supergroup, channel, or forum."""
+    if not u.new_chat_member or not u.new_chat_member.user:
+        return
+    me = client.me or await client.get_me()
+    if u.new_chat_member.user.id != me.id:
+        return
+
+    old_status = u.old_chat_member.status if u.old_chat_member else None
+    new_status = u.new_chat_member.status
+
+    if new_status in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR) and old_status not in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR):
+        chat_title = u.chat.title or "this group"
+        await _send_welcome_greeting(client, u.chat.id, chat_title)
+
+
 @Myra.on_message(filters.new_chat_members)
 async def welcome(client: Myra, m: Message):
-    me = await client.get_me()
+    """Triggered when bot is added via standard service message."""
+    me = client.me or await client.get_me()
+    if not m.new_chat_members:
+        return
     for member in m.new_chat_members:
-        if member.id != me.id:
-            continue
-        await add_served_chat(m.chat.id)
-        chat_title = m.chat.title or "this group"
-        bot_name = me.first_name or "Myra"
-        tag_handle = f"@{me.username}" if me.username else bot_name
-        text = (
-            f"🎉 **Thanks for adding me to {chat_title}!**\n\n"
-            f"Hey everyone, I am **{bot_name}**! ✨\n\n"
-            f"⚙️ Group Admins can send **/mode** to select my replying mode in this group.\n\n"
-            f"*(By default, I only reply when tagged, mentioned ({tag_handle}), or replied to, keeping the group clean.)*"
-        )
-        markup = [
-            [InlineKeyboardButton("⚙️ Configure Mode (/mode)", callback_data=f"gmode:{m.chat.id}:open_from_welcome")],
-            [InlineKeyboardButton("❓ Help", callback_data="HELP")],
-        ]
-        await _send_menu(m, text, markup)
+        if member.id == me.id:
+            chat_title = m.chat.title or "this group"
+            await _send_welcome_greeting(client, m.chat.id, chat_title)
+            break
 
 
-__all__ = ["start", "help", "repo", "welcome"]
+__all__ = ["start", "help", "repo", "welcome", "on_bot_added"]
