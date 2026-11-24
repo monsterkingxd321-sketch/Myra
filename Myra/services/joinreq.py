@@ -418,7 +418,7 @@ async def _send_unmanaged_start(client, user, chat, scope: str = None) -> None:
     """When a join request arrives for an unmanaged group or a group without force-join:
     1. Register the user in served users database.
     2. Send the bot's normal start message and buttons to the user in DM.
-    3. Auto-approve the join request so the user gets into the group.
+    3. Do NOT auto-approve the request (let group admins review and decide).
     """
     from Myra.database.users import add_served_user
     from Myra.modules.helpers import build_start_buttons, start_text
@@ -453,20 +453,11 @@ async def _send_unmanaged_start(client, user, chat, scope: str = None) -> None:
             reply_markup=InlineKeyboardMarkup(buttons),
             disable_web_page_preview=True,
         )
-        LOGGER.info(f"joinreq: sent normal start message to {user.id} for group {chat.id}")
+        LOGGER.info(f"joinreq: sent normal start message to {user.id} for unmanaged group {chat.id} (request left pending)")
     except (Forbidden, UserNotParticipant) as exc:
         LOGGER.debug(f"joinreq: cannot DM {user.id} normal start — {exc}")
     except Exception as exc:
         LOGGER.debug(f"joinreq: error sending normal start to {user.id}: {exc}")
-
-    approved = await _approve(client, chat.id, user, scope=scope)
-    if approved:
-        try:
-            doc = await jdb.get_chat(chat.id, scope=scope)
-            if doc:
-                await jdb.bump(chat.id, "approved", 1, scope=scope)
-        except Exception:
-            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -500,11 +491,11 @@ async def on_join_request(client, request: ChatJoinRequest):
             has_force = True
 
     # If no force channel or group is not managed / paused:
-    # Send normal start message to user in DM and auto-approve!
+    # Send normal start message to user in DM and do NOT auto-approve!
     if not has_force:
         LOGGER.info(
             f"joinreq: request user={user.id} in {chat.id} ({chat_title!r}) has no force-join or unmanaged "
-            "— sending normal start message and auto-approving"
+            "— sending normal start message without auto-approving (request left pending)"
         )
         await _send_unmanaged_start(client, user, chat, scope=scope)
         return
