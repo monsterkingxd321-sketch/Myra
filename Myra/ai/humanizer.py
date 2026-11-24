@@ -157,7 +157,7 @@ _EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\u2764\u2728]"
 )
 
-GIRLY_EMOJIS = ("✨", "🥺", "😅", "🙈", "💖", "😂", "😌", "🌸", "🤭", "😹")
+GIRLY_EMOJIS = ("✨", "❤️", "🥰", "🙈", "💖", "😂", "😌", "🌸", "🤭", "🔥")
 
 
 def feminize(text: str) -> str:

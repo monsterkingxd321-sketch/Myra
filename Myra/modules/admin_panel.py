@@ -154,49 +154,50 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
     clones = len(clones_list)
 
     text = (
-        "✨ **MYRA ADMIN CONTROL PANEL** ✨\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 **Bot:** {_bot_title()}\n"
-        f"👑 **Owner ID:** `{owner_str}` · 🛡 **Admins:** `{len(admins_list)}`\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📊 **Network & Audience:**\n"
-        f" ├ 💬 **Groups:** `{chats}`\n"
-        f" ├ ✉️ **Bot DMs:** `{users}`\n"
-        f" └ 👥 **Userbots:** `{len(my_accounts)}` online (DMs: `{totals.get('userbot_dm', 0)}`)\n\n"
-        "🧠 **AI & Automation Status:**\n"
-        f" ├ 🧠 **Engine:** {'Hybrid (DB + AI)' if ai.get('active') else 'Offline (DB only)'}\n"
-        f" ├ 🔑 **Active Keys:** `{ai.get('active', 0)}/{ai.get('total', 0)}`\n"
-        f" ├ 📚 **Trained DB:** `{db.get('total', 0):,}` pairs\n"
-        f" ├ 🤖 **Bot AutoChat:** {'🟢 ON' if bot_auto else '🔴 OFF'} ({ac.human_interval(bot_interval)})\n"
-        f" └ 👥 **Userbot AutoChat:** {'🟢 ON' if ub_auto else '🔴 OFF'} ({ac.human_interval(ub_interval)})\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Select a module below to configure:"
+        "👑 **MYRA MASTER ADMIN PANEL** 👑\n"
+        "✦ ═════════════════════════ ✦\n"
+        f"🤖 **Bot Profile:** {_bot_title()}\n"
+        f"👑 **Owner ID:** `{owner_str}` │ 🛡 **Admins:** `{len(admins_list)}`\n"
+        "✦ ═════════════════════════ ✦\n\n"
+        "🌐 **AUDIENCE & REACH**\n"
+        f"  ├ 💬 **Served Groups:** `{chats:,}`\n"
+        f"  ├ ✉️ **Private DMs:** `{users:,}`\n"
+        f"  └ 👥 **Userbots Active:** `{len(my_accounts)}` *(DMs: `{totals.get('userbot_dm', 0):,}`)*\n\n"
+        "🧠 **BRAIN & AI INFRASTRUCTURE**\n"
+        f"  ├ ⚡ **Mode:** `{'Hybrid (DB + Gemini/GPT)' if ai.get('active') else 'Offline (DB Brain)'}`\n"
+        f"  ├ 🔑 **API Key Pool:** `{ai.get('active', 0)}/{ai.get('total', 0)} active`\n"
+        f"  └ 📚 **Trained Memory:** `{db.get('total', 0):,}` pairs\n\n"
+        "⚡ **LIVE AUTOMATION CHANNELS**\n"
+        f"  ├ 🤖 **Main Bot AutoChat:** `{'🟢 Active' if bot_auto else '🔴 Paused'}` ({ac.human_interval(bot_interval)})\n"
+        f"  └ 👥 **Userbot AutoChat:** `{'🟢 Active' if ub_auto else '🔴 Paused'}` ({ac.human_interval(ub_interval)})\n"
+        "✦ ═════════════════════════ ✦\n"
+        "✨ *Select a management module below:*"
     )
 
     rows = [
         [
-            InlineKeyboardButton("📢 Broadcast", callback_data="ad_bc"),
-            InlineKeyboardButton("⏰ AutoChat", callback_data="ad_ac"),
+            InlineKeyboardButton("📢 Broadcast Hub", callback_data="ad_bc"),
+            InlineKeyboardButton("⏰ AutoChat Hub", callback_data="ad_ac"),
         ],
         [
             InlineKeyboardButton(f"👑 Admins ({len(admins_list)})", callback_data="ad_admins"),
             InlineKeyboardButton("🚪 Group Requests", callback_data="ad_jr"),
         ],
         [
-            InlineKeyboardButton("👥 Userbots", callback_data="ad_userbots"),
+            InlineKeyboardButton("👥 Userbots Pool", callback_data="ad_userbots"),
             InlineKeyboardButton("📁 Import Sessions", callback_data="ad_import"),
         ],
         [
-            InlineKeyboardButton("🧠 AI & Keys", callback_data="ad_ai"),
+            InlineKeyboardButton("🧠 AI & API Keys", callback_data="ad_ai"),
             InlineKeyboardButton("🎛 Reply Behaviour", callback_data="ad_behaviour"),
         ],
         [
             InlineKeyboardButton(f"🧬 Clones ({clones})", callback_data="ad_clones"),
-            InlineKeyboardButton("📊 Stats", callback_data="ad_stats"),
+            InlineKeyboardButton("📊 System Stats", callback_data="ad_stats"),
         ],
         [
-            InlineKeyboardButton("🧹 Clean DB", callback_data="ad_clean"),
-            InlineKeyboardButton("🔄 Refresh", callback_data="ad_main"),
+            InlineKeyboardButton("🧹 Clean Database", callback_data="ad_clean"),
+            InlineKeyboardButton("🔄 Refresh Panel", callback_data="ad_main"),
         ],
         [
             InlineKeyboardButton("❌ Close Panel", callback_data="ad_close"),

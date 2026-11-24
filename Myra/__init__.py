@@ -130,12 +130,13 @@ OWNER = int(config.OWNER_ID) if config.OWNER_ID else None
 
 class Myra(Client):
     def __init__(self):
+        token = (config.BOT_TOKEN or "").strip().strip("\"'")
         super().__init__(
             name="Myra",
             api_id=config.API_ID,
             api_hash=config.API_HASH,
             lang_code="en",
-            bot_token=config.BOT_TOKEN,
+            bot_token=token or None,
             in_memory=True,
             parse_mode=ParseMode.DEFAULT,
         )

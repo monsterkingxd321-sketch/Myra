@@ -34,9 +34,10 @@ def start_text() -> str:
 
 def group_start_text() -> str:
     return (
-        f"Hey, I am {_name()}.\n\n"
-        "Thanks for adding me.\n\n"
-        "I will chat here from time to time."
+        f"Hey, I am **{_name()}**! ✨\n\n"
+        "Thanks for adding me to this group! 🎉\n\n"
+        "⚙️ Send **/mode** to select my replying mode in this group.\n"
+        "*(By default, I reply only when tagged, mentioned, or replied to.)*"
     )
 
 

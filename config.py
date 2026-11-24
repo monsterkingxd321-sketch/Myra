@@ -5,6 +5,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _clean_str(val):
+    if not val:
+        return ""
+    val = str(val).strip()
+    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+        val = val[1:-1].strip()
+    return val
+
+
 def _env_list(*names, default=""):
     """Read one or more env vars and split them into a clean list.
 
@@ -33,11 +42,11 @@ def _env_bool(name: str, default: bool) -> bool:
 # `python -m Myra` runs a preflight check and tells you what is missing.
 
 # Telegram API credentials — https://my.telegram.org → "API development tools"
-API_ID = int(getenv("API_ID", "0") or 0)
-API_HASH = getenv("API_HASH", "")
+API_ID = int(_clean_str(getenv("API_ID", "0")) or 0)
+API_HASH = _clean_str(getenv("API_HASH", ""))
 
 # Bot configuration — @BotFather
-BOT_TOKEN = getenv("BOT_TOKEN", None)
+BOT_TOKEN = _clean_str(getenv("BOT_TOKEN", "")) or None
 
 # ── MongoDB: two separate clusters ─────────────────────────────────────────
 # MONGO_URL      → the CHAT/TRAINING brain only (``Word.WordDb``: learned
@@ -203,7 +212,7 @@ AUTOCHAT_UB_TARGETS = getenv("AUTOCHAT_UB_TARGETS", "groups")                 # 
 # groups/DMs and settings. The trained Hinglish database and the Gemini keys are
 # shared on purpose — more bots chatting means a better shared brain.
 CLONE_ENABLED = _env_bool("CLONE_ENABLED", True)          # allow /clone at all
-MAX_CLONES = int(getenv("MAX_CLONES", "20"))              # process is shared → cap it
+MAX_CLONES = int(getenv("MAX_CLONES", "0") or 0)          # 0 = unlimited clones
 # Empty = everyone may clone. Comma/space separated ids to restrict it.
 CLONE_ALLOWED_USERS = getenv("CLONE_ALLOWED_USERS", "")
 

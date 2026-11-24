@@ -143,17 +143,17 @@ async def set_joinreq_notify(enabled: bool, scope: str = None) -> bool:
 async def get_group_reply_mode(chat_id: int) -> str:
     """
     Get replying mode for a group:
-      - 'tag_only': replies only when tagged (@mention, bot name) or replied to
+      - 'tag_only': replies only when tagged (@mention, bot name) or replied to (default)
       - 'all': replies to every message
-      - 'medium': tag/reply 100% + partial replies in between (default)
+      - 'medium': tag/reply 100% + partial replies in between
     """
-    val = await get_setting(f"{KEY_GROUP_MODE}:{chat_id}", default="medium")
-    return val if val in ("tag_only", "all", "medium") else "medium"
+    val = await get_setting(f"{KEY_GROUP_MODE}:{chat_id}", default="tag_only")
+    return val if val in ("tag_only", "all", "medium") else "tag_only"
 
 
 async def set_group_reply_mode(chat_id: int, mode: str) -> bool:
     """Set replying mode for a group."""
-    mode = mode if mode in ("tag_only", "all", "medium") else "medium"
+    mode = mode if mode in ("tag_only", "all", "medium") else "tag_only"
     return await set_setting(f"{KEY_GROUP_MODE}:{chat_id}", mode)
 
 

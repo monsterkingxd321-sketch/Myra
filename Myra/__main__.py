@@ -48,7 +48,16 @@ async def start_bot():
     try:
         await Myra.start()
     except Exception as ex:
-        LOGGER.error(ex)
+        LOGGER.error(f"❌ Failed to start Myra bot: {ex}", exc_info=True)
+        raw_tok = str(config.BOT_TOKEN or "")
+        preview = f"{raw_tok[:7]}...{raw_tok[-4:]}" if len(raw_tok) > 12 else "(empty/invalid)"
+        LOGGER.error(
+            "⚠️ Bot Authorization Failed!\n"
+            "If you see 'auth.ImportBotAuthorization' or 'AccessTokenInvalid':\n"
+            f" 1. Check your BOT_TOKEN environment variable (current preview: {preview}).\n"
+            " 2. Make sure this bot was NOT deleted or regenerated in @BotFather.\n"
+            " 3. If needed, open @BotFather -> /mybots -> API Token -> Revoke & copy the new token."
+        )
         quit(1)
 
     for module in ALL_MODULES:

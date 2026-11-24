@@ -1,4 +1,5 @@
 import asyncio
+import random
 import re
 
 from Abg.chat_status import adminsOnly
@@ -9,6 +10,7 @@ from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
 
 from Myra import Myra, mongo, config, LOGGER
 from Myra.database import MYRA, training
+from Myra.database.admins import is_admin, is_owner
 from Myra.database.scope import scope_match
 from Myra.database.settings import get_group_reply_mode, set_group_reply_mode
 from Myra.ai import cleaner
@@ -16,6 +18,59 @@ from Myra.ai.audience import is_real_user
 from Myra.ai.brain import get_ai_reply
 from Myra.ai.humanizer import respond_like_human
 from Myra.modules.helpers import CHATBOT_ON
+
+POSITIVE_KEYWORDS = {
+    "love", "pyar", "pyaar", "dil", "heart", "thanks", "thank you", "thanku", "shukriya",
+    "nice", "good", "best", "cute", "sundar", "khubsurat", "mast", "badhiya", "super",
+    "great", "awesome", "sweet", "babu", "jaan", "happy", "khush", "sahi", "wah", "osm",
+    "congrats", "badhai", "welcome", "pretty", "lovely", "beautiful", "cutie", "dost"
+}
+
+POSITIVE_EMOJIS = {"❤️", "💖", "💕", "💗", "💓", "💞", "💘", "❣️", "🥰", "😍", "😘", "😻", "🤩", "✨", "🌸", "👍", "🥳", "🔥", "🎉", "💐"}
+
+NEGATIVE_KEYWORDS = {
+    "hate", "gussa", "bad", "bura", "bakwas", "ganda", "sad", "dard", "mar", "kill",
+    "leave", "ugly", "faltu", "chup", "nikal", "kutta", "kamina", "hate you", "pagal",
+    "madarchod", "bhosdike", "chutiya", "gaali", "fraud", "scam"
+}
+
+NEGATIVE_EMOJIS = {"👎", "💔", "😡", "🤬", "💩", "🤮", "😢", "😭", "👿", "💀", "☠️", "🖕", "😤", "🤢", "🤡"}
+
+REACTION_CHOICES = ["❤️", "💖", "🥰", "✨", "🔥", "👍"]
+
+
+def is_positive_message(text: str) -> bool:
+    if not text:
+        return False
+    lower = text.lower()
+    for neg_k in NEGATIVE_KEYWORDS:
+        if neg_k in lower:
+            return False
+    for neg_e in NEGATIVE_EMOJIS:
+        if neg_e in text:
+            return False
+
+    for pos_k in POSITIVE_KEYWORDS:
+        if pos_k in lower:
+            return True
+    for pos_e in POSITIVE_EMOJIS:
+        if pos_e in text:
+            return True
+    return False
+
+
+async def maybe_react_positive(client: Client, message: Message):
+    """React with a positive emoji on positive user messages (never react negative)."""
+    try:
+        raw_text = message.text or message.caption or ""
+        if is_positive_message(raw_text):
+            chosen_emoji = random.choice(REACTION_CHOICES)
+            if hasattr(message, "react"):
+                await message.react(chosen_emoji)
+            elif hasattr(client, "send_reaction"):
+                await client.send_reaction(message.chat.id, message.id, chosen_emoji)
+    except Exception:
+        pass
 
 
 # Automatically create the indexes needed for similarity search on startup.
@@ -198,6 +253,7 @@ async def chatbot_group(client: Client, message: Message):
         allow_group_ai=allow_ai,
     )
 
+    await maybe_react_positive(client, message)
     await _send_response(client, message, response, chance)
 
 
@@ -205,11 +261,11 @@ async def _build_group_mode_panel(chat_id: int, chat_title: str) -> tuple[str, I
     current_mode = await get_group_reply_mode(chat_id)
 
     modes_map = {
-        "tag_only": "🏷 Tag & Reply Only",
+        "tag_only": "🏷 Tag & Reply Only (Default)",
         "all": "💬 All Messages",
         "medium": "⚡ Medium (Balanced)",
     }
-    current_label = modes_map.get(current_mode, "⚡ Medium (Balanced)")
+    current_label = modes_map.get(current_mode, "🏷 Tag & Reply Only (Default)")
 
     text = (
         "⚙️ **GROUP BOT REPLY MODE**\n"
@@ -218,13 +274,14 @@ async def _build_group_mode_panel(chat_id: int, chat_title: str) -> tuple[str, I
         f"🎯 **Active Mode:** `{current_label}`\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "Select how the bot & cloned bots should reply in this group:\n\n"
-        "🏷 **Tag & Reply Only**\n"
+        "🏷 **Tag & Reply Only** *(Default)*\n"
         "↳ Sirf tab reply karega jab bot ko tag (@mention ya naam) karein ya uske message par reply karein.\n\n"
         "💬 **All Messages**\n"
         "↳ Group ke har message ka reply karega.\n\n"
         "⚡ **Medium (Balanced)**\n"
         "↳ Tag & reply par 100% reply + baaki messages par beech-beech me partial reply.\n"
-        "━━━━━━━━━━━━━━━━━━━━━━"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🔒 *Only group admins can change this setting.*"
     )
 
     def _btn(code: str, label: str):
@@ -251,14 +308,19 @@ async def mode_cmd(client: Client, m: Message):
 
     user_id = m.from_user.id if m.from_user else None
     if user_id:
-        from Myra.database.admins import is_admin
-        if not await is_admin(user_id):
+        is_grp_admin = False
+        if is_owner(user_id) or await is_admin(user_id):
+            is_grp_admin = True
+        else:
             try:
                 member = await client.get_chat_member(m.chat.id, user_id)
-                if member.status not in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR):
-                    return await m.reply_text("❌ Only group admins can change the bot reply mode.")
+                if member.status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR):
+                    is_grp_admin = True
             except Exception:
-                return await m.reply_text("❌ Only group admins can change the bot reply mode.")
+                pass
+
+        if not is_grp_admin:
+            return await m.reply_text("❌ Only group admins can change the bot reply mode.")
 
     text, markup = await _build_group_mode_panel(m.chat.id, m.chat.title or "Group")
     await m.reply_text(text, reply_markup=markup)
@@ -281,14 +343,30 @@ async def group_mode_callback(client: Client, query: CallbackQuery):
         return await query.answer("Closed")
 
     user_id = query.from_user.id
-    from Myra.database.admins import is_admin
-    if not await is_admin(user_id):
+    is_grp_admin = False
+    if is_owner(user_id) or await is_admin(user_id):
+        is_grp_admin = True
+    else:
         try:
             member = await client.get_chat_member(chat_id, user_id)
-            if member.status not in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR):
-                return await query.answer("❌ Only group admins can change this setting.", show_alert=True)
+            if member.status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR):
+                is_grp_admin = True
         except Exception:
-            return await query.answer("❌ Permission denied.", show_alert=True)
+            pass
+
+    if not is_grp_admin:
+        return await query.answer("❌ Only group admins can change this setting.", show_alert=True)
+
+    if action == "open_from_welcome":
+        text, markup = await _build_group_mode_panel(
+            chat_id,
+            query.message.chat.title if query.message and query.message.chat else "Group",
+        )
+        try:
+            await query.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            pass
+        return await query.answer()
 
     if action in ("tag_only", "all", "medium"):
         await set_group_reply_mode(chat_id, action)
@@ -324,6 +402,8 @@ async def chatbot_private(client: Client, message: Message):
 
     # Strip our own @username so "@mybot hello" is searched as "hello".
     _, query_text = _group_query(client, message)
+
+    await maybe_react_positive(client, message)
 
     # DM chat: MongoDB first, Gemini fallback, human-like pacing.
     # A DM is directed at the bot by definition, so it is always answered.

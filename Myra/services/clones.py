@@ -162,9 +162,9 @@ class CloneManager:
 
     def max_clones(self) -> int:
         try:
-            return int(getattr(config, "MAX_CLONES", 20) or 20)
+            return int(getattr(config, "MAX_CLONES", 0) or 0)
         except Exception:  # noqa: BLE001
-            return 20
+            return 0
 
     def clones_enabled(self) -> bool:
         return bool(getattr(config, "CLONE_ENABLED", True))
@@ -254,8 +254,9 @@ class CloneManager:
             return False, "That is the main bot's own token.", None
 
         existing = await botdb.list_bots()
-        if len(existing) >= self.max_clones():
-            return False, f"Clone limit reached ({self.max_clones()}).", None
+        max_c = self.max_clones()
+        if max_c > 0 and len(existing) >= max_c:
+            return False, f"Clone limit reached ({max_c}).", None
         if any(doc.get("token") == token for doc in existing):
             return False, "This bot token is already added.", None
 

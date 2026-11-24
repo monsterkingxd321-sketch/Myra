@@ -70,13 +70,26 @@ async def repo(_, m: Message):
 
 
 @Myra.on_message(filters.new_chat_members)
-async def welcome(_, m: Message):
-    me = await _.get_me()
+async def welcome(client: Myra, m: Message):
+    me = await client.get_me()
     for member in m.new_chat_members:
         if member.id != me.id:
             continue
         await add_served_chat(m.chat.id)
-        await _send_menu(m, group_start_text(), build_group_buttons())
+        chat_title = m.chat.title or "this group"
+        bot_name = me.first_name or "Myra"
+        tag_handle = f"@{me.username}" if me.username else bot_name
+        text = (
+            f"🎉 **Thanks for adding me to {chat_title}!**\n\n"
+            f"Hey everyone, I am **{bot_name}**! ✨\n\n"
+            f"⚙️ Group Admins can send **/mode** to select my replying mode in this group.\n\n"
+            f"*(By default, I only reply when tagged, mentioned ({tag_handle}), or replied to, keeping the group clean.)*"
+        )
+        markup = [
+            [InlineKeyboardButton("⚙️ Configure Mode (/mode)", callback_data=f"gmode:{m.chat.id}:open_from_welcome")],
+            [InlineKeyboardButton("❓ Help", callback_data="HELP")],
+        ]
+        await _send_menu(m, text, markup)
 
 
 __all__ = ["start", "help", "repo", "welcome"]
