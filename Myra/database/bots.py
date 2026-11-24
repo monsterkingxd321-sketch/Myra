@@ -87,10 +87,29 @@ async def owner_id(scope: str = None):
 
 # ── CRUD ───────────────────────────────────────────────────────────────────
 async def get_bot(scope: str) -> dict | None:
-    if BOTS is None:
+    if BOTS is None or not scope or scope == "None":
         return None
     try:
-        return await BOTS.find_one({"scope": scope})
+        doc = await BOTS.find_one({"scope": scope})
+        if doc:
+            return doc
+        # Fallback search by bot_id if scope is c<bot_id>, clone_<bot_id>, or digits
+        bot_id = None
+        if scope.startswith("clone_"):
+            try:
+                bot_id = int(scope[6:])
+            except Exception:
+                pass
+        elif scope.startswith("c"):
+            try:
+                bot_id = int(scope[1:])
+            except Exception:
+                pass
+        elif scope.isdigit():
+            bot_id = int(scope)
+        if bot_id is not None:
+            return await BOTS.find_one({"bot_id": bot_id})
+        return None
     except Exception as exc:  # noqa: BLE001
         LOGGER.debug(f"get_bot({scope}) failed: {exc}")
         return None
@@ -154,10 +173,26 @@ async def register_bot(bot_id: int, token: str, owner_id: int, username: str = "
 
 
 async def update_bot(scope: str, data: dict) -> bool:
-    if BOTS is None:
+    if BOTS is None or not scope or scope == "None":
         return False
     try:
-        await BOTS.update_one({"scope": scope}, {"$set": data})
+        bot_id = None
+        if scope.startswith("clone_"):
+            try:
+                bot_id = int(scope[6:])
+            except Exception:
+                pass
+        elif scope.startswith("c"):
+            try:
+                bot_id = int(scope[1:])
+            except Exception:
+                pass
+        elif scope.isdigit():
+            bot_id = int(scope)
+        query = {"scope": scope}
+        if bot_id is not None:
+            query = {"$or": [{"scope": scope}, {"bot_id": bot_id}]}
+        await BOTS.update_one(query, {"$set": data})
         set_bot_info(scope, **data)
         return True
     except Exception as exc:  # noqa: BLE001
@@ -166,11 +201,30 @@ async def update_bot(scope: str, data: dict) -> bool:
 
 
 async def delete_bot(scope: str) -> bool:
-    if BOTS is None:
+    if BOTS is None or not scope or scope == "None":
         return False
     try:
-        result = await BOTS.delete_one({"scope": scope})
+        bot_id = None
+        if scope.startswith("clone_"):
+            try:
+                bot_id = int(scope[6:])
+            except Exception:
+                pass
+        elif scope.startswith("c"):
+            try:
+                bot_id = int(scope[1:])
+            except Exception:
+                pass
+        elif scope.isdigit():
+            bot_id = int(scope)
+        query = {"scope": scope}
+        if bot_id is not None:
+            query = {"$or": [{"scope": scope}, {"bot_id": bot_id}]}
+        result = await BOTS.delete_one(query)
         BOT_INFO.pop(scope, None)
+        if bot_id:
+            BOT_INFO.pop(f"c{bot_id}", None)
+            BOT_INFO.pop(f"clone_{bot_id}", None)
         return result.deleted_count > 0
     except Exception as exc:  # noqa: BLE001
         LOGGER.error(f"delete_bot({scope}) failed: {exc}")

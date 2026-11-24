@@ -251,18 +251,35 @@ class CloneManager:
                 return CLIENTS[scope]
 
             if client is None:
-                target_dc = doc.get("target_dc") or getattr(config, "TELEGRAM_DC", 5)
-                client = CloneBotClient(
-                    name=f"clone_{doc.get('bot_id') or scope}",
-                    api_id=config.API_ID,
-                    api_hash=config.API_HASH,
-                    bot_token=doc["token"],
-                    in_memory=True,
-                    parse_mode=ParseMode.DEFAULT,
-                    target_dc=target_dc,
-                )
+                dcs_to_try = [doc.get("target_dc") or getattr(config, "TELEGRAM_DC", 5), 5, 4, 1]
+                dcs_to_try = list(dict.fromkeys(dcs_to_try))
+                last_exc = None
+                for dc_try in dcs_to_try:
+                    c = CloneBotClient(
+                        name=f"clone_{doc.get('bot_id') or scope}",
+                        api_id=config.API_ID,
+                        api_hash=config.API_HASH,
+                        bot_token=doc["token"],
+                        in_memory=True,
+                        parse_mode=ParseMode.DEFAULT,
+                        target_dc=dc_try,
+                    )
+                    try:
+                        await c.start()
+                        client = c
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        LOGGER.warning(f"🧬 Clone start attempt failed on DC {dc_try}: {exc}")
+                        try:
+                            await c.stop()
+                        except Exception:
+                            pass
+                if client is None:
+                    raise last_exc or RuntimeError("Could not connect to Telegram servers")
+            else:
+                await client.start()
 
-            await client.start()
             me = await client.get_me()
             scope = clone_scope(me.id)
 
@@ -286,7 +303,7 @@ class CloneManager:
                 username=me.username or "",
                 name=client.name,
             )
-            await botdb.update_bot(scope, {"enabled": True, "last_start": time.time()})
+            await botdb.update_bot(scope, {"enabled": True, "last_start": time.time(), "target_dc": getattr(client, "target_dc", 5)})
             LOGGER.info(
                 f"🧬 Clone started: @{me.username or me.id} "
                 f"(scope {scope}, owner {doc.get('owner_id')})"
@@ -399,22 +416,27 @@ class CloneManager:
     async def stop_clone(self, scope: str) -> bool:
         """Stop a clone's client (the DB entry stays, so it can be resumed)."""
         client = CLIENTS.pop(scope, None)
+        if client is None and scope:
+            if scope.startswith("c"):
+                client = CLIENTS.pop(f"clone_{scope[1:]}", None)
+            elif scope.startswith("clone_"):
+                client = CLIENTS.pop(f"c{scope[6:]}", None)
         try:
             await botdb.update_bot(scope, {"enabled": False})
         except Exception:
             pass
-        if client is None:
-            return False
-        try:
-            await client.stop()
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.debug(f"🧬 stop_clone({scope}) error: {exc}")
+        if client is not None:
+            try:
+                await client.stop()
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.debug(f"🧬 stop_clone({scope}) error: {exc}")
         return True
 
     async def restart_clone(self, scope: str):
         """Stop and start a clone again from its stored document."""
         doc = await botdb.get_bot(scope)
         if not doc:
+            LOGGER.warning(f"🧬 restart_clone: bot not found for scope '{scope}'")
             return None
         await self.stop_clone(scope)
         return await self.start_clone(doc)
@@ -422,6 +444,11 @@ class CloneManager:
     async def delete_clone(self, scope: str, keep_data: bool = False) -> bool:
         """Stop a clone and forget it (optionally keeping its chats/settings)."""
         await self.stop_clone(scope)
+        CLIENTS.pop(scope, None)
+        if scope and scope.startswith("c"):
+            CLIENTS.pop(f"clone_{scope[1:]}", None)
+        elif scope and scope.startswith("clone_"):
+            CLIENTS.pop(f"c{scope[6:]}", None)
         return await botdb.delete_bot(scope)
 
     async def stop_all(self):
@@ -440,11 +467,19 @@ class CloneManager:
         """Stored clones enriched with their live status."""
         docs = await botdb.list_bots()
         for doc in docs:
-            doc["running"] = CLIENTS.get(doc.get("scope")) is not None
+            scope = doc.get("scope") or clone_scope(doc.get("bot_id"))
+            doc["scope"] = scope
+            doc["running"] = CLIENTS.get(scope) is not None
         return sorted(docs, key=lambda d: d.get("created_at") or 0)
 
     def is_running(self, scope: str) -> bool:
-        return CLIENTS.get(scope) is not None
+        if CLIENTS.get(scope) is not None:
+            return True
+        if scope and scope.startswith("c"):
+            return CLIENTS.get(f"clone_{scope[1:]}") is not None
+        if scope and scope.startswith("clone_"):
+            return CLIENTS.get(f"c{scope[6:]}") is not None
+        return False
 
 
 clone_manager = CloneManager()

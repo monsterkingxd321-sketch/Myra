@@ -835,6 +835,7 @@ async def _import_panel() -> tuple[str, InlineKeyboardMarkup]:
 
 async def _clones_panel() -> tuple[str, InlineKeyboardMarkup]:
     from Myra.services.clones import clone_manager
+    from Myra.database.scope import clone_scope
 
     clones = await clone_manager.list_clones()
     lines = [
@@ -865,8 +866,8 @@ async def _clones_panel() -> tuple[str, InlineKeyboardMarkup]:
     lines.append("Tap any token above to copy. Manage bots below:")
 
     rows = []
-    for doc in clones[:10]:
-        scope = doc.get("scope")
+    for doc in clones[:15]:
+        scope = doc.get("scope") or clone_scope(doc.get("bot_id"))
         alias = f"@{doc['username']}" if doc.get("username") else str(doc.get("bot_id"))
         is_running = doc.get("running")
         status_action = "Stop" if is_running else "Start"
@@ -1449,20 +1450,33 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         await show(await _clones_panel())
         return
 
-    if data.startswith("ad_cl_toggle:") or data.startswith("ad_cl_del:"):
-        _, action, scope = data.split(":", 2)
+    if data.startswith("ad_cl_toggle:"):
+        scope = data.split(":", 1)[1]
         from Myra.services.clones import clone_manager
 
-        if action == "toggle":
+        try:
             if clone_manager.is_running(scope):
                 await clone_manager.stop_clone(scope)
-                alert = "Stopped"
+                alert = "Clone bot stopped."
             else:
                 client = await clone_manager.restart_clone(scope)
-                alert = "Started" if client else "Could not start"
-        else:
+                alert = "Clone bot started." if client else "Could not start clone."
+        except Exception as exc:
+            LOGGER.error(f"Clone toggle error: {exc}")
+            alert = f"Error: {exc}"
+        await show(await _clones_panel(), alert)
+        return
+
+    if data.startswith("ad_cl_del:"):
+        scope = data.split(":", 1)[1]
+        from Myra.services.clones import clone_manager
+
+        try:
             await clone_manager.delete_clone(scope)
-            alert = "Deleted"
+            alert = "Clone bot deleted."
+        except Exception as exc:
+            LOGGER.error(f"Clone delete error: {exc}")
+            alert = f"Error: {exc}"
         await show(await _clones_panel(), alert)
         return
 
@@ -1470,8 +1484,13 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         scope = data.split(":", 1)[1]
         from Myra.services.clones import clone_manager
 
-        client = await clone_manager.restart_clone(scope)
-        await show(await _clones_panel(), "Restarted" if client else "Restart failed")
+        try:
+            client = await clone_manager.restart_clone(scope)
+            alert = "Clone bot restarted." if client else "Restart failed."
+        except Exception as exc:
+            LOGGER.error(f"Clone restart error: {exc}")
+            alert = f"Restart failed: {exc}"
+        await show(await _clones_panel(), alert)
         return
 
     if data.startswith("ad_cl_token:"):
@@ -1479,15 +1498,31 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         from Myra.database import bots as botdb
         doc = await botdb.get_bot(scope)
         if not doc or not doc.get("token"):
-            return await query.answer("Token not found", show_alert=True)
+            return await query.answer("Token not found.", show_alert=True)
         alias = f"@{doc['username']}" if doc.get("username") else str(doc.get("bot_id"))
         token = doc.get("token")
+        name = doc.get("name") or alias
+        status = "Running [✓]" if doc.get("enabled") else "Stopped [x]"
+        
+        # 1. Alert popup dialog with token
         await query.answer(f"Token for {alias}:\n{token}", show_alert=True)
+
+        # 2. Dedicated token viewer panel with back button
+        text = (
+            "╭───「 Clone Bot Token 」\n"
+            f"│ Bot: **{name}** ({alias})\n"
+            f"│ Status: `{status}`\n"
+            f"│ Scope: `{scope}`\n"
+            "╰──────────────────────\n\n"
+            "**Bot Token:**\n"
+            f"`{token}`\n\n"
+            "_(Tap the token above to copy it to clipboard)_"
+        )
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Back to Clones", callback_data="ad_clones")],
+        ])
         try:
-            await query.message.reply_text(
-                f"**Bot Token for {alias}**\n\n`{token}`\n\n_(Tap token to copy)_",
-                quote=True,
-            )
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         except Exception:
             pass
         return
