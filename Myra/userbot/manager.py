@@ -100,6 +100,12 @@ class AccountManager:
             await client.start()
             me = await client.get_me()
 
+            raw_phone = getattr(me, "phone_number", None)
+            if raw_phone:
+                phone = f"+{str(raw_phone).lstrip('+')}"
+            elif phone and not phone.startswith("+"):
+                phone = f"+{phone}"
+
             ub_accounts[account_id] = {
                 "client": client,
                 "telegram_id": me.id,
@@ -117,13 +123,16 @@ class AccountManager:
                 "status": "CONNECTED",
             }
 
-            # Update MongoDB status
-            await update_account(account_id, {
+            # Update MongoDB status and phone
+            up_data = {
                 "status": "CONNECTED",
                 "username": me.username or username,
                 "name": ub_accounts[account_id]["name"],
                 "added_by": added_by,
-            }, scope=scope)
+            }
+            if phone:
+                up_data["phone"] = phone
+            await update_account(account_id, up_data, scope=scope)
 
             # Register message handlers
             from Myra.userbot.handlers import register_userbot_handlers

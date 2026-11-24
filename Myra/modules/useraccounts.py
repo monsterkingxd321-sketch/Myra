@@ -30,15 +30,11 @@ from Myra.userbot.auth import (
 
 
 def _mask_phone(phone: str) -> str:
-    """Mask phone number for safe display (e.g. +91********10)."""
+    """Format phone number for clear display."""
     if not phone:
-        return "—"
+        return "Not available"
     phone_clean = phone.strip()
-    if len(phone_clean) <= 6:
-        return phone_clean
-    prefix = phone_clean[:3]
-    suffix = phone_clean[-2:]
-    return f"{prefix}********{suffix}"
+    return f"+{phone_clean.lstrip('+')}"
 
 
 def _format_speed_label(mode: str, delay_ms) -> str:
@@ -119,9 +115,25 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
         keyboard_rows = []
 
         if not all_accounts:
-            text += "ℹ️ *No userbot accounts connected yet.*\nClick **[ ➕ Add Userbot ]** to link an account."
+            text += "ℹ️ *No userbot accounts connected yet.*\nClick **[ Add Userbot ]** to link an account."
         else:
-            text += "Select any userbot below to open its dedicated settings & controls:\n"
+            text += "Connected Userbots:\n"
+            for idx, acc in enumerate(all_accounts, 1):
+                account_id = acc["account_id"]
+                in_mem = ub_accounts.get(account_id, {})
+                name = in_mem.get("name", acc.get("name", "Unknown"))
+                username = in_mem.get("username", acc.get("username", ""))
+                u_str = f"@{username}" if username else f"ID: {acc.get('telegram_id', '')}"
+                phone = in_mem.get("phone") or acc.get("phone") or ""
+                if not phone:
+                    cl = in_mem.get("client")
+                    c_me = getattr(cl, "me", None) if cl else None
+                    if c_me and getattr(c_me, "phone_number", None):
+                        phone = f"+{str(c_me.phone_number).lstrip('+')}"
+                        in_mem["phone"] = phone
+                p_str = f" · Phone: `{phone}`" if phone else ""
+                text += f"• {name} ({u_str}){p_str}\n"
+            text += "\nSelect any userbot below to open its dedicated settings & controls:\n"
 
             # Owner accounts section
             if owner_accs:
@@ -130,10 +142,17 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     in_mem = ub_accounts.get(account_id, {})
                     name = in_mem.get("name", acc.get("name", "Unknown"))
                     username = in_mem.get("username", acc.get("username", ""))
-                    user_tag = f"@{username}" if username else f"#{idx}"
+                    phone = in_mem.get("phone") or acc.get("phone") or ""
+                    if not phone:
+                        cl = in_mem.get("client")
+                        c_me = getattr(cl, "me", None) if cl else None
+                        if c_me and getattr(c_me, "phone_number", None):
+                            phone = f"+{str(c_me.phone_number).lstrip('+')}"
+                            in_mem["phone"] = phone
+                    user_tag = phone if phone else (f"@{username}" if username else f"#{idx}")
                     autochat_state = in_mem.get("autochat", acc.get("autochat", True))
-                    status_icon = "🟢" if autochat_state else "🔴"
-                    btn_text = f"👑 {name} ({user_tag}) • {status_icon}"
+                    status_sym = "[✓]" if autochat_state else "[x]"
+                    btn_text = f"{name} ({user_tag}) • {status_sym}"
                     keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
             # Admin accounts section
@@ -143,7 +162,14 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     in_mem = ub_accounts.get(account_id, {})
                     name = in_mem.get("name", acc.get("name", "Unknown"))
                     username = in_mem.get("username", acc.get("username", ""))
-                    user_tag = f"@{username}" if username else f"#{idx}"
+                    phone = in_mem.get("phone") or acc.get("phone") or ""
+                    if not phone:
+                        cl = in_mem.get("client")
+                        c_me = getattr(cl, "me", None) if cl else None
+                        if c_me and getattr(c_me, "phone_number", None):
+                            phone = f"+{str(c_me.phone_number).lstrip('+')}"
+                            in_mem["phone"] = phone
+                    user_tag = phone if phone else (f"@{username}" if username else f"#{idx}")
                     added_by_id = acc.get("added_by", "Unknown")
                     autochat_state = in_mem.get("autochat", acc.get("autochat", True))
                     status_sym = "[✓]" if autochat_state else "[x]"
@@ -201,8 +227,24 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             "╭───「 Userbot Dashboard 」\n"
             f"│ Connected Accounts: {len(my_accounts)}\n"
             "╰──────────────────────\n\n"
-            "Select a userbot below to open settings:"
+            "Connected Userbots:\n"
         )
+        for idx, acc in enumerate(my_accounts, 1):
+            account_id = acc["account_id"]
+            in_mem = ub_accounts.get(account_id, {})
+            name = in_mem.get("name", acc.get("name", "Unknown"))
+            username = in_mem.get("username", acc.get("username", ""))
+            u_str = f"@{username}" if username else f"ID: {acc.get('telegram_id', '')}"
+            phone = in_mem.get("phone") or acc.get("phone") or ""
+            if not phone:
+                cl = in_mem.get("client")
+                c_me = getattr(cl, "me", None) if cl else None
+                if c_me and getattr(c_me, "phone_number", None):
+                    phone = f"+{str(c_me.phone_number).lstrip('+')}"
+                    in_mem["phone"] = phone
+            p_str = f" · Phone: `{phone}`" if phone else ""
+            text += f"{idx}. {name} ({u_str}){p_str}\n"
+        text += "\nSelect a userbot below to open settings:"
 
         keyboard_rows = []
         for index, acc in enumerate(my_accounts, 1):
@@ -211,7 +253,14 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
 
             name = in_mem.get("name", acc.get("name", "Unknown"))
             username = in_mem.get("username", acc.get("username", ""))
-            user_tag = f"@{username}" if username else f"#{index}"
+            phone = in_mem.get("phone") or acc.get("phone") or ""
+            if not phone:
+                cl = in_mem.get("client")
+                c_me = getattr(cl, "me", None) if cl else None
+                if c_me and getattr(c_me, "phone_number", None):
+                    phone = f"+{str(c_me.phone_number).lstrip('+')}"
+                    in_mem["phone"] = phone
+            user_tag = phone if phone else (f"@{username}" if username else f"#{index}")
 
             autochat_state = in_mem.get("autochat", acc.get("autochat", True))
             status_sym = "[✓]" if autochat_state else "[x]"
@@ -248,7 +297,24 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
     username = in_mem.get("username", acc.get("username", ""))
     username_str = f"@{username}" if username else "—"
     name = in_mem.get("name", acc.get("name", "Unknown"))
-    phone_masked = _mask_phone(in_mem.get("phone", acc.get("phone", "")))
+
+    phone = in_mem.get("phone") or acc.get("phone") or ""
+    if not phone:
+        cl = in_mem.get("client")
+        c_me = getattr(cl, "me", None) if cl else None
+        if c_me and getattr(c_me, "phone_number", None):
+            phone = f"+{str(c_me.phone_number).lstrip('+')}"
+            in_mem["phone"] = phone
+            try:
+                from Myra.userbot.storage import update_account
+                import asyncio
+                asyncio.create_task(update_account(account_id, {"phone": phone}))
+            except Exception:
+                pass
+    elif phone and not phone.startswith("+"):
+        phone = f"+{phone}"
+
+    phone_display = phone if phone else "Not available"
 
     is_connected = account_id in ub_accounts and ub_accounts[account_id].get("status") == "CONNECTED"
     status_str = "Connected" if is_connected else "Disconnected"
@@ -289,7 +355,7 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
         f"╭───「 Userbot: {name} 」\n"
         f"│ ID: {telegram_id}\n"
         f"│ Username: {username_str}\n"
-        f"│ Phone: {phone_masked}\n"
+        f"│ Phone: {phone_display}\n"
         f"│ Added By: {creator_str}\n"
         f"│ Connection: {status_str}\n"
         f"│ AutoChat: {autochat_label}\n"
@@ -908,9 +974,20 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         telegram_id = in_mem.get("telegram_id", acc.get("telegram_id", 0))
         username = in_mem.get("username", acc.get("username", ""))
         name = in_mem.get("name", acc.get("name", "Unknown"))
-        phone_masked = _mask_phone(in_mem.get("phone", acc.get("phone", "")))
+
+        phone = in_mem.get("phone") or acc.get("phone") or ""
+        if not phone:
+            cl = in_mem.get("client")
+            c_me = getattr(cl, "me", None) if cl else None
+            if c_me and getattr(c_me, "phone_number", None):
+                phone = f"+{str(c_me.phone_number).lstrip('+')}"
+                in_mem["phone"] = phone
+        elif phone and not phone.startswith("+"):
+            phone = f"+{phone}"
+        phone_display = phone if phone else "Not available"
+
         is_conn = account_id in ub_accounts and ub_accounts[account_id].get("status") == "CONNECTED"
-        status_str = "🟢 Connected" if is_conn else "🔴 Disconnected"
+        status_str = "Connected [✓]" if is_conn else "Disconnected [x]"
         autochat_state = in_mem.get("autochat", acc.get("autochat", True))
         autochat_str = "ON" if autochat_state else "OFF"
         delay = in_mem.get("reply_delay", acc.get("reply_delay", 0))
@@ -919,23 +996,23 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
 
         added_by = acc.get("added_by", "Owner")
         owner_id = owner_id_sync()
-        creator_str = "👑 Owner" if (owner_id and int(added_by) == owner_id) else f"👤 Admin (`{added_by}`)"
+        creator_str = "Owner" if (owner_id and int(added_by) == owner_id) else f"Admin ({added_by})"
 
         info_text = (
-            "👤 **Userbot Account Info**\n"
+            "Userbot Account Info\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🆔 **Telegram ID:** `{telegram_id}`\n"
-            f"👤 **Username:** @{username if username else '—'}\n"
-            f"📛 **Name:** {name}\n"
-            f"📱 **Phone:** `{phone_masked}`\n"
-            f"🛡 **Added By:** {creator_str}\n"
-            f"📊 **Connection:** {status_str}\n"
-            f"🤖 **AutoChat:** {autochat_str}\n"
-            f"⚡ **Speed:** {speed_label}\n"
+            f"ID: `{telegram_id}`\n"
+            f"Username: @{username if username else '—'}\n"
+            f"Name: {name}\n"
+            f"Phone: `{phone_display}`\n"
+            f"Added By: {creator_str}\n"
+            f"Connection: {status_str}\n"
+            f"AutoChat: {autochat_str}\n"
+            f"Speed: {speed_label}\n"
             "━━━━━━━━━━━━━━━━━━━━━━"
         )
         info_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"↩️ Back to {name}", callback_data=f"ub_panel:{account_id}")]
+            [InlineKeyboardButton(f"Back to {name}", callback_data=f"ub_panel:{account_id}")]
         ])
         await query.message.edit_text(info_text, reply_markup=info_markup, disable_web_page_preview=True)
         await query.answer()

@@ -267,9 +267,11 @@ async def _broadcast_sender_panel() -> tuple[str, InlineKeyboardMarkup]:
         rows.append([InlineKeyboardButton("All Userbots", callback_data="ad_bc_s:userbots")])
         for account_id, data in list(accounts.items())[:12]:
             name = data.get("name") or account_id
+            phone = data.get("phone") or ""
+            phone_tag = f" ({phone})" if phone else ""
             status = "[✓]" if data.get("status") == "CONNECTED" else "[x]"
             rows.append([
-                InlineKeyboardButton(f"{status} {name}", callback_data=f"ad_bc_s:{account_id}")
+                InlineKeyboardButton(f"{status} {name}{phone_tag}", callback_data=f"ad_bc_s:{account_id}")
             ])
     else:
         rows.append([InlineKeyboardButton("All Userbots (none connected)", callback_data="ad_noop")])
@@ -836,31 +838,44 @@ async def _clones_panel() -> tuple[str, InlineKeyboardMarkup]:
 
     clones = await clone_manager.list_clones()
     lines = [
-        "╭───「 Cloned Bots 」",
+        "╭───「 Cloned Bots Management 」",
+        f"│ Total Cloned Bots: {len(clones)}",
         "╰──────────────────────",
-        "Users can host their own bots using /clone <bot_token>.",
-        f"Total Clones: {len(clones)}",
         "",
     ]
     if not clones:
-        lines.append("No active clones.")
-    for doc in clones:
-        status_sym = "[✓]" if doc.get("running") else "[x]"
-        alias = f"@{doc['username']}" if doc.get("username") else str(doc.get("bot_id"))
-        lines.append(f"{status_sym} {alias} · owner {doc.get('owner_id')}")
+        lines.append("No active clones found.")
+        lines.append("Users can host their own bots using `/clone <bot_token>`.")
+    else:
+        lines.append("Active Clones & Credentials:")
+        lines.append("")
+        for idx, doc in enumerate(clones, 1):
+            running = doc.get("running")
+            status_badge = "Running [✓]" if running else "Stopped [x]"
+            alias = f"@{doc['username']}" if doc.get("username") else f"Bot ID: {doc.get('bot_id')}"
+            name = doc.get("name") or alias
+            owner = doc.get("owner_id") or "Unknown"
+            token = doc.get("token") or "Not set"
+            lines.append(f"{idx}. **{name}** ({alias})")
+            lines.append(f"   • Status: `{status_badge}`")
+            lines.append(f"   • Owner ID: `{owner}`")
+            lines.append(f"   • Token: `{token}`")
+            lines.append("")
     lines.append("──────────────────────")
+    lines.append("Tap any token above to copy. Manage bots below:")
 
     rows = []
     for doc in clones[:10]:
         scope = doc.get("scope")
         alias = f"@{doc['username']}" if doc.get("username") else str(doc.get("bot_id"))
-        status_action = "Stop" if doc.get('running') else "Start"
+        is_running = doc.get("running")
+        status_action = "Stop" if is_running else "Start"
         rows.append([
-            InlineKeyboardButton(
-                f"{status_action} {alias}",
-                callback_data=f"ad_cl_toggle:{scope}",
-            ),
+            InlineKeyboardButton(f"{status_action} {alias}", callback_data=f"ad_cl_toggle:{scope}"),
             InlineKeyboardButton("Restart", callback_data=f"ad_cl_restart:{scope}"),
+        ])
+        rows.append([
+            InlineKeyboardButton("View Token", callback_data=f"ad_cl_token:{scope}"),
             InlineKeyboardButton("Delete", callback_data=f"ad_cl_del:{scope}"),
         ])
     rows.append([
@@ -1441,13 +1456,13 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         if action == "toggle":
             if clone_manager.is_running(scope):
                 await clone_manager.stop_clone(scope)
-                alert = "🛑 Stopped"
+                alert = "Stopped"
             else:
                 client = await clone_manager.restart_clone(scope)
-                alert = "▶️ Started" if client else "❌ Could not start"
+                alert = "Started" if client else "Could not start"
         else:
             await clone_manager.delete_clone(scope)
-            alert = "🗑 Deleted"
+            alert = "Deleted"
         await show(await _clones_panel(), alert)
         return
 
@@ -1456,7 +1471,25 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
         from Myra.services.clones import clone_manager
 
         client = await clone_manager.restart_clone(scope)
-        await show(await _clones_panel(), "🔄 Restarted" if client else "❌ Restart failed")
+        await show(await _clones_panel(), "Restarted" if client else "Restart failed")
+        return
+
+    if data.startswith("ad_cl_token:"):
+        scope = data.split(":", 1)[1]
+        from Myra.database import bots as botdb
+        doc = await botdb.get_bot(scope)
+        if not doc or not doc.get("token"):
+            return await query.answer("Token not found", show_alert=True)
+        alias = f"@{doc['username']}" if doc.get("username") else str(doc.get("bot_id"))
+        token = doc.get("token")
+        await query.answer(f"Token for {alias}:\n{token}", show_alert=True)
+        try:
+            await query.message.reply_text(
+                f"**Bot Token for {alias}**\n\n`{token}`\n\n_(Tap token to copy)_",
+                quote=True,
+            )
+        except Exception:
+            pass
         return
 
     if data == "ad_ai":

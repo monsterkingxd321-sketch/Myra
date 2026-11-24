@@ -326,6 +326,10 @@ class CloneManager:
     async def stop_clone(self, scope: str) -> bool:
         """Stop a clone's client (the DB entry stays, so it can be resumed)."""
         client = CLIENTS.pop(scope, None)
+        try:
+            await botdb.update_bot(scope, {"enabled": False})
+        except Exception:
+            pass
         if client is None:
             return False
         try:
