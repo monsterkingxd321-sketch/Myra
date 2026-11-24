@@ -148,6 +148,16 @@ class Myra(Client):
         self.username = None
         self.mention = ""
 
+    async def switch_dc(self, dc_id: int):
+        """Switch initial Telegram data center for in_memory client."""
+        try:
+            await self.storage.open()
+            await self.storage.dc_id(dc_id)
+            await self.storage.auth_key(None)
+            LOGGER.info(f"🔄 Telegram client configured for DC {dc_id}")
+        except Exception as exc:
+            LOGGER.debug(f"Could not switch DC on storage: {exc}")
+
     async def start(self):
         await super().start()
         self.id = self.me.id

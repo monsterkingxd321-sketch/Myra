@@ -47,24 +47,36 @@ def run_flask():
 # ─────────────────────────────────────
 async def start_bot():
     max_boot_attempts = 15
+    dc_candidates = [getattr(config, "TELEGRAM_DC", 2)]
+    for dc in (4, 1, 5, 2):
+        if dc not in dc_candidates:
+            dc_candidates.append(dc)
+
     for boot_attempt in range(1, max_boot_attempts + 1):
+        target_dc = dc_candidates[(boot_attempt - 1) % len(dc_candidates)]
         try:
-            LOGGER.info(f"🚀 Starting Myra client (attempt {boot_attempt}/{max_boot_attempts})...")
+            if hasattr(Myra, "switch_dc"):
+                await Myra.switch_dc(target_dc)
+            LOGGER.info(f"🚀 Starting Myra client (attempt {boot_attempt}/{max_boot_attempts} on DC {target_dc})...")
             await Myra.start()
-            LOGGER.info("✅ Myra bot client started successfully!")
+            LOGGER.info(f"✅ Myra bot client started successfully on DC {target_dc}!")
             break
         except Exception as ex:
-            LOGGER.warning(f"⚠️ Myra.start() attempt {boot_attempt} failed: {ex}")
+            LOGGER.warning(f"⚠️ Myra.start() attempt {boot_attempt} (DC {target_dc}) failed: {ex}")
             try:
-                await Myra.stop()
+                if getattr(Myra, "is_connected", False):
+                    await Myra.stop()
+                elif hasattr(Myra, "disconnect"):
+                    await Myra.disconnect()
             except Exception:
                 pass
 
             if boot_attempt < max_boot_attempts:
-                backoff_wait = min(30, 5 * boot_attempt)
+                next_dc = dc_candidates[boot_attempt % len(dc_candidates)]
+                backoff_wait = min(20, 2 * boot_attempt)
                 LOGGER.info(
-                    f"⏳ Telegram DC returned a temporary error ({ex}). "
-                    f"Keeping health server alive and waiting {backoff_wait}s before reconnecting..."
+                    f"⏳ Telegram DC {target_dc} returned: {ex}. "
+                    f"Rotating to DC {next_dc} in {backoff_wait}s (health server staying alive)..."
                 )
                 await asyncio.sleep(backoff_wait)
             else:
@@ -75,8 +87,8 @@ async def start_bot():
                     "⚠️ Bot Authorization Failed!\n"
                     "If you see 'auth.ImportBotAuthorization' TimeoutError or AccessTokenInvalid:\n"
                     " 1. Telegram requires BOTH a valid BOT_TOKEN AND a valid API_ID + API_HASH pair from https://my.telegram.org.\n"
-                    " 2. If you only changed BOT_TOKEN, make sure your API_ID and API_HASH are also 100% correct and not blocked/expired.\n"
-                    " 3. If your API_ID was flagged by Telegram, create a fresh app at https://my.telegram.org -> API development tools.\n"
+                    " 2. If you changed BOT_TOKEN, make sure your API_ID and API_HASH are also 100% correct and not blocked/expired.\n"
+                    " 3. If Telegram DC 2 returned 500 RPC_CALL_FAIL, you can explicitly set TELEGRAM_DC=4 or TELEGRAM_DC=1 in host variables.\n"
                     f" 4. Current BOT_TOKEN preview: {preview}."
                 )
                 quit(1)
@@ -258,7 +270,7 @@ def preflight() -> bool:
     # Verify token with Telegram HTTP Bot API
     try:
         import requests
-        r = requests.get(f"https://api.telegram.org/bot{bot_tok_str}/getMe", timeout=7)
+        r = requests.get(f"https://api.telegram.org/bot{bot_tok_str}/getMe", timeout=25)
         data = r.json()
         if data.get("ok"):
             bot_obj = data.get("result", {})

@@ -150,12 +150,19 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     btn_text = f"👤 {name} ({user_tag}) [Admin: {added_by_id}] • {status_icon}"
                     keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
-        keyboard_rows.append([
-            InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
-            InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
-        ])
+        notify_enabled = await ai_settings.get_joinreq_notify()
+        notify_icon = "🟢 ON" if notify_enabled else "🔴 OFF"
+
         keyboard_rows.append([
             InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
+            InlineKeyboardButton("🗑 Remove Admin", callback_data="ub_manage_admins"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton(f"🔔 Invite Notify: {notify_icon}", callback_data="ub_toggle_notify"),
+            InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
             InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
         ])
 
@@ -164,6 +171,8 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
     else:
         # Admin view: Only accounts added by this admin
         my_accounts = await get_accounts_by_user(viewer_id)
+        notify_enabled = await ai_settings.get_joinreq_notify()
+        notify_icon = "🟢 ON" if notify_enabled else "🔴 OFF"
 
         if not my_accounts:
             text = (
@@ -173,11 +182,15 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             )
             markup = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
-                    InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
+                    InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
+                    InlineKeyboardButton("🗑 Remove Admin", callback_data="ub_manage_admins"),
                 ],
                 [
-                    InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
+                    InlineKeyboardButton(f"🔔 Invite Notify: {notify_icon}", callback_data="ub_toggle_notify"),
+                    InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+                ],
+                [
+                    InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
                     InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
                 ],
             ])
@@ -205,11 +218,15 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
         keyboard_rows.append([
-            InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
-            InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
+            InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
+            InlineKeyboardButton("🗑 Remove Admin", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
-            InlineKeyboardButton("➕ Add Admin", callback_data="ub_add_admin_prompt"),
+            InlineKeyboardButton(f"🔔 Invite Notify: {notify_icon}", callback_data="ub_toggle_notify"),
+            InlineKeyboardButton("➕ Add Userbot", callback_data="ub_add"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton("👑 Manage Admins", callback_data="ub_manage_admins"),
             InlineKeyboardButton("🔄 Refresh", callback_data="ub_main_refresh"),
         ])
 
@@ -635,6 +652,21 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         await remove_admin(target_id)
         await query.answer(f"🗑 Admin {target_id} removed!", show_alert=True)
         text, markup = await _build_admin_management_panel()
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        return
+
+    # Toggle Group Join Request / Invite Notifications
+    if data == "ub_toggle_notify":
+        if not is_owner(user_id) and not await is_admin(user_id):
+            return await query.answer("❌ Only Bot Owner/Admin can change notification settings.", show_alert=True)
+        now = not await ai_settings.get_joinreq_notify()
+        await ai_settings.set_joinreq_notify(now)
+        state_str = "🟢 ON (Notifications enabled)" if now else "🔴 OFF (Notifications muted)"
+        await query.answer(f"Invite Notifications: {state_str}", show_alert=True)
+        text, markup = await _build_main_dashboard(user_id)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         except Exception:
