@@ -196,9 +196,10 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
         ],
         [
             InlineKeyboardButton("Clean Database", callback_data="ad_clean"),
-            InlineKeyboardButton("Refresh", callback_data="ad_main"),
+            InlineKeyboardButton("Button Styling", callback_data="ad_btn_style"),
         ],
         [
+            InlineKeyboardButton("Refresh", callback_data="ad_main"),
             InlineKeyboardButton("Close", callback_data="ad_close"),
         ],
     ]
@@ -548,8 +549,8 @@ async def _jr_chats_panel() -> tuple[str, InlineKeyboardMarkup]:
             f" · 🔗 `{len(chat.get('required') or [])}`"
         )
         rows.append([
-            InlineKeyboardButton("🧪 Must-join Setup", callback_data=f"ad_jr_set:{chat['chat_id']}"),
-            InlineKeyboardButton("❌ Remove", callback_data=f"ad_jr_del:{chat['chat_id']}"),
+            InlineKeyboardButton("Must-join Setup", callback_data=f"ad_jr_set:{chat['chat_id']}"),
+            InlineKeyboardButton("Remove", callback_data=f"ad_jr_del:{chat['chat_id']}"),
         ])
     if len(chats) > 28:
         lines.append(f"\n… aur `{len(chats) - 28}` groups.")
@@ -639,25 +640,25 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
     rows = [
         [
             InlineKeyboardButton(
-                f"🤖 Auto {'✅' if auto else '❌'}", callback_data=f"ad_jr_cauto:{chat_id}"
+                f"Auto: {'ON' if auto else 'OFF'}", callback_data=f"ad_jr_cauto:{chat_id}"
             ),
-            InlineKeyboardButton(f"⏱ {timeout}m", callback_data=f"ad_jr_ctime:{chat_id}"),
+            InlineKeyboardButton(f"Timeout: {timeout}m", callback_data=f"ad_jr_ctime:{chat_id}"),
         ],
         [
             InlineKeyboardButton(
-                f"🔔 Alerts {'✅' if notify else '❌'}", callback_data=f"ad_jr_cnotify:{chat_id}"
+                f"Alerts: {'ON' if notify else 'OFF'}", callback_data=f"ad_jr_cnotify:{chat_id}"
             ),
-            InlineKeyboardButton("✨ Welcome", callback_data=f"ad_jr_cwel:{chat_id}"),
+            InlineKeyboardButton("Welcome Msg", callback_data=f"ad_jr_cwel:{chat_id}"),
         ],
         [
             InlineKeyboardButton(
-                f"🖼 Photo {'✅' if photo else '❌'}", callback_data=f"ad_jr_cphoto:{chat_id}"
+                f"Photo: {'ON' if photo else 'OFF'}", callback_data=f"ad_jr_cphoto:{chat_id}"
             ),
-            InlineKeyboardButton("➕ Add Channel/Group", callback_data=f"ad_jr_radd:{chat_id}"),
+            InlineKeyboardButton("Add Channel/Group", callback_data=f"ad_jr_radd:{chat_id}"),
         ],
         [
             InlineKeyboardButton(
-                f"🎨 VERIFY Style: {v_style_badge}", callback_data=f"ad_jr_vstyle:{chat_id}"
+                f"Verify Style: {v_style_badge}", callback_data=f"ad_jr_vstyle:{chat_id}"
             ),
         ],
     ]
@@ -667,14 +668,14 @@ async def _jr_req_panel(chat_id: int) -> tuple[str, InlineKeyboardMarkup]:
         s_name = style_names.get(entry_style, "Default")
         rows.append([
             InlineKeyboardButton(
-                f"✏️ {label}", callback_data=f"ad_jr_rlabel:{chat_id}:{index}"
+                label, callback_data=f"ad_jr_rlabel:{chat_id}:{index}"
             ),
-            InlineKeyboardButton("🔗 Link", callback_data=f"ad_jr_rlink:{chat_id}:{index}"),
-            InlineKeyboardButton(f"🎨 {s_name}", callback_data=f"ad_jr_rstyle:{chat_id}:{index}"),
-            InlineKeyboardButton("🗑", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
+            InlineKeyboardButton("Link", callback_data=f"ad_jr_rlink:{chat_id}:{index}"),
+            InlineKeyboardButton(f"Style: {s_name}", callback_data=f"ad_jr_rstyle:{chat_id}:{index}"),
+            InlineKeyboardButton("Del", callback_data=f"ad_jr_rdel:{chat_id}:{index}"),
         ])
     rows.append([
-        InlineKeyboardButton("🧪 Test (DM card)", callback_data=f"ad_jr_test:{chat_id}"),
+        InlineKeyboardButton("Test Card", callback_data=f"ad_jr_test:{chat_id}"),
     ])
     rows.append([_back("ad_jr_chats")])
     return "\n".join(lines), InlineKeyboardMarkup(rows)
@@ -718,7 +719,7 @@ async def _ai_panel() -> tuple[str, InlineKeyboardMarkup]:
         "━━━━━━━━━━━━━━━━━━━━━━",
     ]
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Reload keys", callback_data="ad_ai_reload")],
+        [InlineKeyboardButton("Reload Keys", callback_data="ad_ai_reload")],
         [_back()],
     ])
     return "\n".join(lines), markup
@@ -869,6 +870,42 @@ async def _clones_panel() -> tuple[str, InlineKeyboardMarkup]:
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
+async def _button_style_panel() -> tuple[str, InlineKeyboardMarkup]:
+    """Button styling panel for configuring Telegram Bot API 8.0 button appearance."""
+    current_mode = await ai_settings.get_button_style_mode()
+    modes = [
+        ("default", "Default (Neutral)"),
+        ("primary", "Primary (Blue)"),
+        ("success", "Success (Green)"),
+        ("danger", "Danger (Red)"),
+        ("mix", "Mix (Smart Actions)"),
+        ("auto", "Auto (Rainbow Pattern)"),
+    ]
+    lines = [
+        "╭───「 Telegram Button Styling 」",
+        f"│ Active Style: {current_mode.title()}",
+        "╰──────────────────────",
+        "",
+        "Choose the button color theme applied to all bot & clone keyboards:",
+        "",
+        "• Default - Standard neutral Telegram buttons",
+        "• Primary - All buttons sleek Telegram blue",
+        "• Success - All buttons Telegram green",
+        "• Danger - All buttons Telegram red",
+        "• Mix - Smart colors (Red for delete/stop, Green for add/start, Blue for nav)",
+        "• Auto - Dynamically alternating rainbow pattern",
+        "",
+        "──────────────────────",
+        "Changes take effect immediately across all bots.",
+    ]
+    rows = []
+    for code, label in modes:
+        tick = "✓ " if current_mode == code else ""
+        rows.append([InlineKeyboardButton(f"{tick}{label}", callback_data=f"ad_btn_style_set:{code}")])
+    rows.append([_back()])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Commands
 # ══════════════════════════════════════════════════════════════════════════
@@ -966,7 +1003,7 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
 
     if data == "ad_admin_add":
         pending_input[user_id] = {"kind": "add_admin"}
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel", callback_data="ad_admin_cancel")]])
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="ad_admin_cancel")]])
         await show((
             "👑 **ADD NEW ADMIN**\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1554,6 +1591,17 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
             pass
         return
 
+    # ── button styling ─────────────────────────────────────────────────────
+    if data == "ad_btn_style":
+        await show(await _button_style_panel())
+        return
+
+    if data.startswith("ad_btn_style_set:"):
+        new_style = data.split(":", 1)[1]
+        await ai_settings.set_button_style_mode(new_style)
+        await show(await _button_style_panel(), f"✓ Style set to {new_style.title()}")
+        return
+
     # ── broadcast ──────────────────────────────────────────────────────────
     if data == "ad_bc":
         await show(await _broadcast_sender_panel())
@@ -1630,7 +1678,7 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
                 "Minimum 1 minute.\n\n"
                 "`/cancel` se cancel karo.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("↩️ Back", callback_data=f"ad_ac_{scope}")]
+                    [_back(f"ad_ac_{scope}")]
                 ]),
             )
         except Exception:  # noqa: BLE001

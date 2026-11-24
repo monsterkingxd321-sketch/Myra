@@ -138,14 +138,44 @@ def _is_bot_message(message: Message, me) -> bool:
     return bool((sender and sender.id == me.id) or getattr(replied, "outgoing", False))
 
 
+def _extract_name_triggers(me) -> list[str]:
+    """
+    Extract trigger words and phrases from bot's display name.
+    Handles full name, first name, last name, and clean constituent words.
+    Example:
+      first_name = 'lauda', last_name = 'string'
+      Triggers -> ['lauda string', 'string', 'lauda']
+    """
+    if not me:
+        return []
+    triggers = []
+    first = (getattr(me, "first_name", "") or "").strip()
+    last = (getattr(me, "last_name", "") or "").strip()
+    full = f"{first} {last}".strip()
+
+    if len(full) >= 2:
+        triggers.append(full)
+    if len(first) >= 2 and first != full:
+        triggers.append(first)
+    if len(last) >= 2 and last != full:
+        triggers.append(last)
+
+    clean_full = re.sub(r"[^\w\s]", " ", full)
+    words = [w.strip() for w in clean_full.split() if len(w.strip()) >= 2]
+    for w in words:
+        if w.lower() not in ("bot", "the", "and") and w not in triggers:
+            triggers.append(w)
+
+    return sorted(list(dict.fromkeys(triggers)), key=lambda s: len(s), reverse=True)
+
+
 def _group_query(client: Client, message: Message) -> tuple[bool, str]:
     """
     Work out whether a group message addresses the bot, and return the text with
-    the @mention removed.
+    the @mention or name trigger removed.
 
-    The bot answers when it is @mentioned, replied to, or its username appears
-    anywhere in the message — and the mention is stripped so the database search
-    sees "hello bhai" instead of "@mybot hello bhai".
+    The bot answers when it is @mentioned, replied to, or called by name (full or partial)
+    — and the trigger is stripped so the database search sees clean text.
     """
     raw = message.text or message.caption or ""
     me = getattr(client, "me", None)
@@ -172,13 +202,27 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
         for match in re.finditer(rf"@{re.escape(username)}\b", raw, re.IGNORECASE):
             spans.append(match.span())
 
+    # Check bot name triggers (full name, first name, last name, clean word tokens)
+    name_triggers = _extract_name_triggers(me)
+    for trigger in name_triggers:
+        pattern = rf"(?<!\w){re.escape(trigger)}(?!\w)"
+        matches = list(re.finditer(pattern, raw, re.IGNORECASE))
+        if matches:
+            addressed = True
+            for m in matches:
+                spans.append(m.span())
+            break
+
     if not spans:
         return addressed, raw.strip()
 
     chars = list(raw)
     for start, end in sorted(spans, key=lambda span: span[0], reverse=True):
         del chars[start:end]
-    return addressed, "".join(chars).strip()
+    cleaned = "".join(chars).strip()
+    if addressed and not cleaned:
+        cleaned = "hello"
+    return addressed, cleaned
 
 
 @Myra.on_cmd("chatbot", group_only=True)

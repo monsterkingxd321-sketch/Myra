@@ -51,13 +51,13 @@ def _format_speed_label(mode: str, delay_ms) -> str:
         delay_ms = 0
     seconds = delay_ms / 1000
     if mode == "fast" or delay_ms == 0:
-        return "⚡ Fast (0s)"
+        return "Fast (0s)"
     elif mode == "medium" or delay_ms == 5000:
-        return f"⏱ Medium ({seconds:g}s)"
+        return f"Medium ({seconds:g}s)"
     elif mode == "slow" or delay_ms == 10000:
-        return f"🐢 Slow ({seconds:g}s)"
+        return f"Slow ({seconds:g}s)"
     else:
-        return f"⚙️ Custom ({seconds:g}s)"
+        return f"Custom ({seconds:g}s)"
 
 
 async def _can_manage_account(user_id: int, account_id: str) -> tuple[bool, dict | None]:
@@ -373,8 +373,8 @@ async def _build_speed_menu(account_id: str, viewer_id: int) -> tuple[str, Inlin
 
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("⚡ Fast (0s)", callback_data=f"ub_setspeed:{account_id}:fast"),
-            InlineKeyboardButton("⏱ Medium (5s)", callback_data=f"ub_setspeed:{account_id}:medium"),
+            InlineKeyboardButton("Fast (0s)", callback_data=f"ub_setspeed:{account_id}:fast"),
+            InlineKeyboardButton("Medium (5s)", callback_data=f"ub_setspeed:{account_id}:medium"),
         ],
         [
             InlineKeyboardButton("Slow (10s)", callback_data=f"ub_setspeed:{account_id}:slow"),
@@ -487,7 +487,7 @@ async def addadmin_cmd(client: Myra, m: Message):
             "Please send the **Telegram User ID** or **@username** of the user you want to add as Admin.\n\n"
             "Send /cancel to cancel.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel", callback_data="ub_cancel_admin_prompt")]
+                [InlineKeyboardButton("Cancel", callback_data="ub_cancel_admin_prompt")]
             ])
         )
 
@@ -631,7 +631,7 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             "Please send the **Telegram User ID** or **@username** of the user you want to authorize as Bot Admin.\n\n"
             "Send /cancel to cancel.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel", callback_data="ub_cancel_admin_prompt")]
+                [InlineKeyboardButton("Cancel", callback_data="ub_cancel_admin_prompt")]
             ])
         )
         await query.answer()
@@ -704,7 +704,7 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             "(ya many accounts ki `.zip`) bhej do, turant add ho jayegi.\n\n"
             "Send /cancel to cancel this operation.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("❌ Cancel", callback_data="ub_cancel_auth")]
+                [InlineKeyboardButton("Cancel", callback_data="ub_cancel_auth")]
             ])
         )
         await query.answer()
@@ -795,7 +795,7 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
                 "• `0` = Instant (no delay)\n\n"
                 "Send /cancel to cancel.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("❌ Cancel", callback_data=f"ub_speed:{account_id}")]
+                    [InlineKeyboardButton("Cancel", callback_data=f"ub_speed:{account_id}")]
                 ])
             )
             await query.answer()
@@ -955,8 +955,8 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         )
         confirm_markup = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("✅ Confirm Remove", callback_data=f"ub_rm_confirm:{account_id}"),
-                InlineKeyboardButton("❌ Cancel", callback_data=f"ub_panel:{account_id}"),
+                InlineKeyboardButton("Confirm Remove", callback_data=f"ub_rm_confirm:{account_id}"),
+                InlineKeyboardButton("Cancel", callback_data=f"ub_panel:{account_id}"),
             ]
         ])
         await query.message.edit_text(confirm_text, reply_markup=confirm_markup)

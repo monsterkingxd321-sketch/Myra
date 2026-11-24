@@ -29,6 +29,9 @@ KEY_JOINREQ_WELCOME = "joinreq_welcome"
 KEY_JOINREQ_PHOTO = "joinreq_welcome_photo"
 KEY_JOINREQ_NOTIFY = "joinreq_notify"
 KEY_GROUP_MODE = "group_reply_mode"
+KEY_BUTTON_STYLE = "btn_style"
+
+_cached_button_style = "default"
 
 
 def _default_delay() -> int:
@@ -204,6 +207,97 @@ def parse_delay_text(text: str) -> int | None:
         return None
 
 
+async def get_button_style_mode(scope: str = None) -> str:
+    """Active Telegram button style mode: 'default', 'primary', 'success', 'danger', 'mix', 'auto'."""
+    global _cached_button_style
+    val = await get_setting(KEY_BUTTON_STYLE, default="default", scope=scope)
+    if val not in ("default", "primary", "success", "danger", "mix", "auto"):
+        val = "default"
+    _cached_button_style = val
+    return val
+
+
+def get_current_button_style_mode() -> str:
+    """Fast in-memory read for hot serialization loops."""
+    return _cached_button_style or "default"
+
+
+async def set_button_style_mode(mode: str, scope: str = None) -> bool:
+    """Update Telegram button style mode across the entire fleet."""
+    global _cached_button_style
+    if mode not in ("default", "primary", "success", "danger", "mix", "auto"):
+        mode = "default"
+    _cached_button_style = mode
+    return await set_setting(KEY_BUTTON_STYLE, mode, scope=scope)
+
+
+def _install_button_styling_hook():
+    """Hook into InlineKeyboardMarkup.write to dynamically apply ButtonStyle."""
+    try:
+        from pyrogram import enums
+        from pyrogram.types import InlineKeyboardMarkup
+
+        if getattr(InlineKeyboardMarkup, "_styled_hook_installed", False):
+            return
+
+        _orig_write = InlineKeyboardMarkup.write
+
+        async def _styled_write(self, client):
+            mode = get_current_button_style_mode()
+            if mode != "default":
+                rainbow = (
+                    enums.ButtonStyle.PRIMARY,
+                    enums.ButtonStyle.SUCCESS,
+                    enums.ButtonStyle.DANGER,
+                )
+                for r_idx, row in enumerate(self.inline_keyboard):
+                    for c_idx, btn in enumerate(row):
+                        if getattr(btn, "style", enums.ButtonStyle.DEFAULT) == enums.ButtonStyle.DEFAULT:
+                            if mode == "primary":
+                                btn.style = enums.ButtonStyle.PRIMARY
+                            elif mode == "success":
+                                btn.style = enums.ButtonStyle.SUCCESS
+                            elif mode == "danger":
+                                btn.style = enums.ButtonStyle.DANGER
+                            elif mode == "auto":
+                                btn.style = rainbow[(r_idx * 2 + c_idx) % 3]
+                            elif mode == "mix":
+                                txt = (getattr(btn, "text", "") or "").lower()
+                                cb = getattr(btn, "callback_data", "")
+                                if isinstance(cb, bytes):
+                                    cb = cb.decode("utf-8", "ignore")
+                                combined = f"{txt} {cb or ''}".lower()
+                                if any(w in combined for w in (
+                                    "del", "remove", "stop", "cancel", "close", "clean",
+                                    "reset", "ban", "kick", "mute", "reject", "block", "off", "disable"
+                                )):
+                                    btn.style = enums.ButtonStyle.DANGER
+                                elif any(w in combined for w in (
+                                    "add", "save", "start", "restart", "verify", "active",
+                                    "refresh", "done", "approve", "accept", "on", "enable",
+                                    "confirm", "yes", "speed", "chance"
+                                )):
+                                    btn.style = enums.ButtonStyle.SUCCESS
+                                else:
+                                    btn.style = enums.ButtonStyle.PRIMARY
+            return await _orig_write(self, client)
+
+        InlineKeyboardMarkup.write = _styled_write
+        InlineKeyboardMarkup._styled_hook_installed = True
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.debug(f"Could not install button styling hook: {exc}")
+
+
+_install_button_styling_hook()
+
+try:
+    import asyncio
+    _loop = asyncio.get_running_loop()
+    _loop.create_task(get_button_style_mode())
+except RuntimeError:
+    pass
+
+
 __all__ = [
     "SETTINGS",
     "KEY_REPLY_DELAY",
@@ -212,6 +306,7 @@ __all__ = [
     "KEY_REPLY_SCOPE",
     "KEY_JOINREQ_NOTIFY",
     "KEY_GROUP_MODE",
+    "KEY_BUTTON_STYLE",
     "get_setting",
     "set_setting",
     "get_reply_delay",
@@ -226,5 +321,8 @@ __all__ = [
     "set_joinreq_notify",
     "get_group_reply_mode",
     "set_group_reply_mode",
+    "get_button_style_mode",
+    "get_current_button_style_mode",
+    "set_button_style_mode",
     "parse_delay_text",
 ]
