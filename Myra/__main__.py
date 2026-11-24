@@ -47,16 +47,23 @@ def run_flask():
 # ─────────────────────────────────────
 async def start_bot():
     max_boot_attempts = 15
-    dc_candidates = [getattr(config, "TELEGRAM_DC", 2)]
-    for dc in (4, 1, 5, 2):
+    dc_candidates = [getattr(config, "TELEGRAM_DC", 5)]
+    for dc in (5, 4, 1, 2):
         if dc not in dc_candidates:
             dc_candidates.append(dc)
 
     for boot_attempt in range(1, max_boot_attempts + 1):
         target_dc = dc_candidates[(boot_attempt - 1) % len(dc_candidates)]
         try:
-            if hasattr(Myra, "switch_dc"):
-                await Myra.switch_dc(target_dc)
+            if hasattr(Myra, "set_target_dc"):
+                Myra.set_target_dc(target_dc)
+            try:
+                await Myra.storage.open()
+                await Myra.storage.auth_key(None)
+                await Myra.storage.user_id(None)
+                await Myra.storage.is_bot(None)
+            except Exception:
+                pass
             LOGGER.info(f"🚀 Starting Myra client (attempt {boot_attempt}/{max_boot_attempts} on DC {target_dc})...")
             await Myra.start()
             LOGGER.info(f"✅ Myra bot client started successfully on DC {target_dc}!")
@@ -68,6 +75,11 @@ async def start_bot():
                     await Myra.stop()
                 elif hasattr(Myra, "disconnect"):
                     await Myra.disconnect()
+            except Exception:
+                pass
+            try:
+                await Myra.storage.open()
+                await Myra.storage.auth_key(None)
             except Exception:
                 pass
 

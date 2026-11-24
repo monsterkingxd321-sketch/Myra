@@ -31,6 +31,23 @@ from motor.motor_asyncio import AsyncIOMotorClient as MongoCli
 import pyrogram.utils
 from pyrogram import Client
 from pyrogram.enums import ParseMode
+from pyrogram.session import Auth
+
+DC_PROD_IPV4 = {
+    1: "149.154.175.53",
+    2: "149.154.167.51",
+    3: "149.154.175.100",
+    4: "149.154.167.91",
+    5: "91.108.56.130",
+}
+
+DC_PROD_IPV6 = {
+    1: "2001:b28:f23d:f001::a",
+    2: "2001:67c:4e8:f002::a",
+    3: "2001:b28:f23d:f003::a",
+    4: "2001:67c:4e8:f004::a",
+    5: "2001:b28:f23f:f005::a",
+}
 
 # Patch Pyrogram for 64-bit Telegram Channel IDs (> 2 billion)
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
@@ -147,16 +164,55 @@ class Myra(Client):
         self.name = "Myra"
         self.username = None
         self.mention = ""
+        self.target_dc = getattr(config, "TELEGRAM_DC", 5)
 
-    async def switch_dc(self, dc_id: int):
-        """Switch initial Telegram data center for in_memory client."""
-        try:
-            await self.storage.open()
-            await self.storage.dc_id(dc_id)
-            await self.storage.auth_key(None)
-            LOGGER.info(f"🔄 Telegram client configured for DC {dc_id}")
-        except Exception as exc:
-            LOGGER.debug(f"Could not switch DC on storage: {exc}")
+    def set_target_dc(self, dc_id: int):
+        self.target_dc = dc_id
+
+    async def load_session(self):
+        await self.storage.open()
+
+        session_empty = any([
+            await self.storage.test_mode() is None,
+            await self.storage.auth_key() is None,
+            await self.storage.user_id() is None,
+            await self.storage.is_bot() is None
+        ])
+
+        if session_empty:
+            if not self.api_id or not self.api_hash:
+                raise AttributeError("The API key is required for new authorizations.")
+
+            await self.storage.api_id(self.api_id)
+
+            chosen_dc = getattr(self, "target_dc", getattr(config, "TELEGRAM_DC", 5))
+            if self.test_mode:
+                ip = "149.154.167.40"
+                port = 80
+            else:
+                ip = (DC_PROD_IPV6 if self.ipv6 else DC_PROD_IPV4).get(chosen_dc, "91.108.56.130")
+                port = 443
+
+            await self.storage.dc_id(chosen_dc)
+            await self.storage.server_address(ip)
+            await self.storage.port(port)
+            await self.storage.date(0)
+            await self.storage.test_mode(self.test_mode)
+
+            LOGGER.info(f"🌐 Creating MTProto Auth Key on DC {chosen_dc} ({ip}:{port})...")
+            auth_key = await Auth(
+                self,
+                await self.storage.dc_id(),
+                await self.storage.server_address(),
+                await self.storage.port(),
+                await self.storage.test_mode()
+            ).create()
+
+            await self.storage.auth_key(auth_key)
+            await self.storage.user_id(None)
+            await self.storage.is_bot(None)
+        else:
+            await super().load_session()
 
     async def start(self):
         await super().start()

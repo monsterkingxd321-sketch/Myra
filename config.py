@@ -45,11 +45,11 @@ def _env_bool(name: str, default: bool) -> bool:
 API_ID = int(_clean_str(getenv("API_ID", "0")) or 0)
 API_HASH = _clean_str(getenv("API_HASH", ""))
 
-# Optional initial Telegram Data Center (1=Miami, 2=Amsterdam (default), 4=Amsterdam, 5=Singapore)
+# Optional initial Telegram Data Center (1=Miami, 2=Amsterdam, 4=Amsterdam, 5=Singapore)
 try:
-    TELEGRAM_DC = int(_clean_str(getenv("TELEGRAM_DC", "2")) or 2)
+    TELEGRAM_DC = int(_clean_str(getenv("TELEGRAM_DC", "5")) or 5)
 except (ValueError, TypeError):
-    TELEGRAM_DC = 2
+    TELEGRAM_DC = 5
 
 # Bot configuration — @BotFather
 BOT_TOKEN = _clean_str(getenv("BOT_TOKEN", "")) or None
