@@ -35,12 +35,64 @@ from uuid import uuid4
 
 from pyrogram import Client
 from pyrogram.enums import ParseMode
+from pyrogram.session import Auth
 
-from Myra import config, LOGGER
+from Myra import config, LOGGER, DC_PROD_IPV4, DC_PROD_IPV6
 from Myra.database import bots as botdb
 from Myra.database.scope import MAIN_SCOPE, clone_scope, reset_scope, set_scope
 
 TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_\-]{30,}$")
+
+
+class CloneBotClient(Client):
+    """
+    Telegram client for cloned bots.
+    Directs new authorizations to DC 5 (or configured target DC) to avoid DC 2's
+    intermittent 500 RPC_CALL_FAIL on ImportBotAuthorization.
+    """
+    def __init__(self, *args, target_dc: int = 5, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.target_dc = target_dc
+
+    async def load_session(self):
+        await self.storage.open()
+        session_empty = any([
+            await self.storage.test_mode() is None,
+            await self.storage.auth_key() is None,
+            await self.storage.user_id() is None,
+            await self.storage.is_bot() is None
+        ])
+        if session_empty:
+            if not self.api_id or not self.api_hash:
+                raise AttributeError("The API key is required for new authorizations.")
+            await self.storage.api_id(self.api_id)
+            chosen_dc = getattr(self, "target_dc", getattr(config, "TELEGRAM_DC", 5))
+            if self.test_mode:
+                ip = "149.154.167.40"
+                port = 80
+            else:
+                ip = (DC_PROD_IPV6 if self.ipv6 else DC_PROD_IPV4).get(chosen_dc, "91.108.56.130")
+                port = 443
+
+            await self.storage.dc_id(chosen_dc)
+            await self.storage.server_address(ip)
+            await self.storage.port(port)
+            await self.storage.date(0)
+            await self.storage.test_mode(self.test_mode)
+
+            LOGGER.info(f"🌐 Creating MTProto Auth Key for clone on DC {chosen_dc} ({ip}:{port})...")
+            auth_key = await Auth(
+                self,
+                await self.storage.dc_id(),
+                await self.storage.server_address(),
+                await self.storage.port(),
+                await self.storage.test_mode()
+            ).create()
+            await self.storage.auth_key(auth_key)
+            await self.storage.user_id(None)
+            await self.storage.is_bot(None)
+        else:
+            await super().load_session()
 
 # scope -> live Client (main bot is not stored here, see bot_client_for)
 CLIENTS: dict = {}
@@ -69,6 +121,7 @@ def attach_bot_attrs(client, me):
     client.name = _full_name(me)
     client.username = me.username
     client.mention = me.mention
+    client.me = me
     return client
 
 
@@ -198,13 +251,15 @@ class CloneManager:
                 return CLIENTS[scope]
 
             if client is None:
-                client = Client(
+                target_dc = doc.get("target_dc") or getattr(config, "TELEGRAM_DC", 5)
+                client = CloneBotClient(
                     name=f"clone_{doc.get('bot_id') or scope}",
                     api_id=config.API_ID,
                     api_hash=config.API_HASH,
                     bot_token=doc["token"],
                     in_memory=True,
                     parse_mode=ParseMode.DEFAULT,
+                    target_dc=target_dc,
                 )
 
             await client.start()
@@ -260,23 +315,40 @@ class CloneManager:
         if any(doc.get("token") == token for doc in existing):
             return False, "This bot token is already added.", None
 
-        probe = Client(
-            name=f"clone_probe_{uuid4().hex[:12]}",
-            api_id=config.API_ID,
-            api_hash=config.API_HASH,
-            bot_token=token,
-            in_memory=True,
-            parse_mode=ParseMode.DEFAULT,
-        )
-        try:
-            await probe.start()
-            me = await probe.get_me()
-        except Exception as exc:  # noqa: BLE001
+        probe = None
+        me = None
+        target_dc_winner = 5
+        dcs_to_try = [getattr(config, "TELEGRAM_DC", 5), 4, 1]
+        dcs_to_try = list(dict.fromkeys(dcs_to_try))
+        last_exc = None
+
+        for dc_attempt in dcs_to_try:
+            probe = CloneBotClient(
+                name=f"clone_probe_{uuid4().hex[:12]}",
+                api_id=config.API_ID,
+                api_hash=config.API_HASH,
+                bot_token=token,
+                in_memory=True,
+                parse_mode=ParseMode.DEFAULT,
+                target_dc=dc_attempt,
+            )
             try:
-                await probe.stop()
-            except Exception:  # noqa: BLE001
-                pass
-            text = str(exc) or exc.__class__.__name__
+                LOGGER.info(f"🧬 Probing clone token on DC {dc_attempt}...")
+                await probe.start()
+                me = await probe.get_me()
+                target_dc_winner = dc_attempt
+                LOGGER.info(f"✅ Clone probe succeeded on DC {dc_attempt} for @{me.username or me.id}")
+                break
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    await probe.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                last_exc = exc
+                LOGGER.warning(f"⚠️ Clone probe failed on DC {dc_attempt}: {exc}")
+
+        if not me:
+            text = str(last_exc) or last_exc.__class__.__name__ if last_exc else "Connection failed"
             return False, f"Invalid bot token: {text}", None
 
         if not getattr(me, "is_bot", False):
@@ -312,7 +384,8 @@ class CloneManager:
                 username=me.username or "",
                 name=probe.name,
             )
-            LOGGER.info(f"🧬 New clone created: @{me.username or me.id} by {owner_id} (scope {scope})")
+            await botdb.update_bot(scope, {"target_dc": target_dc_winner})
+            LOGGER.info(f"🧬 New clone created: @{me.username or me.id} by {owner_id} (scope {scope}, target_dc {target_dc_winner})")
             return True, f"@{me.username or me.id} is live!", doc
         except Exception as exc:  # noqa: BLE001
             CLIENTS.pop(scope, None)

@@ -135,23 +135,29 @@ def _is_bot_message(message: Message, me) -> bool:
     if replied is None:
         return False
     sender = getattr(replied, "from_user", None)
-    return bool((sender and sender.id == me.id) or getattr(replied, "outgoing", False))
+    my_id = getattr(me, "id", None)
+    return bool((sender and my_id and sender.id == my_id) or getattr(replied, "outgoing", False))
 
 
-def _extract_name_triggers(me) -> list[str]:
+def _extract_name_triggers(entity) -> list[str]:
     """
-    Extract trigger words and phrases from bot's display name.
+    Extract trigger words and phrases from bot's display name or client.
     Handles full name, first name, last name, and clean constituent words.
     Example:
       first_name = 'lauda', last_name = 'string'
       Triggers -> ['lauda string', 'string', 'lauda']
     """
-    if not me:
+    if not entity:
         return []
     triggers = []
+    me = getattr(entity, "me", None) or entity
     first = (getattr(me, "first_name", "") or "").strip()
     last = (getattr(me, "last_name", "") or "").strip()
     full = f"{first} {last}".strip()
+
+    entity_name = (getattr(entity, "name", "") or "").strip()
+    if entity_name and entity_name != full and len(entity_name) >= 2:
+        triggers.append(entity_name)
 
     if len(full) >= 2:
         triggers.append(full)
@@ -160,7 +166,7 @@ def _extract_name_triggers(me) -> list[str]:
     if len(last) >= 2 and last != full:
         triggers.append(last)
 
-    clean_full = re.sub(r"[^\w\s]", " ", full)
+    clean_full = re.sub(r"[^\w\s]", " ", f"{full} {entity_name}")
     words = [w.strip() for w in clean_full.split() if len(w.strip()) >= 2]
     for w in words:
         if w.lower() not in ("bot", "the", "and") and w not in triggers:
@@ -178,12 +184,14 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
     — and the trigger is stripped so the database search sees clean text.
     """
     raw = message.text or message.caption or ""
-    me = getattr(client, "me", None)
-    if me is None:
+    me = getattr(client, "me", None) or client
+    my_id = getattr(me, "id", None) or getattr(client, "id", None)
+    username = (getattr(me, "username", None) or getattr(client, "username", "") or "").lower()
+
+    if my_id is None and not username:
         return False, raw.strip()
 
     addressed = _is_bot_message(message, me)
-    username = (me.username or "").lower()
     spans = []
 
     for entity in message.entities or message.caption_entities or []:
@@ -193,7 +201,7 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
                 addressed = True
                 spans.append((entity.offset, entity.offset + entity.length))
         elif entity.type == MessageEntityType.TEXT_MENTION:
-            if entity.user and entity.user.id == me.id:
+            if entity.user and entity.user.id == my_id:
                 addressed = True
                 spans.append((entity.offset, entity.offset + entity.length))
 
@@ -203,7 +211,7 @@ def _group_query(client: Client, message: Message) -> tuple[bool, str]:
             spans.append(match.span())
 
     # Check bot name triggers (full name, first name, last name, clean word tokens)
-    name_triggers = _extract_name_triggers(me)
+    name_triggers = _extract_name_triggers(client)
     for trigger in name_triggers:
         pattern = rf"(?<!\w){re.escape(trigger)}(?!\w)"
         matches = list(re.finditer(pattern, raw, re.IGNORECASE))

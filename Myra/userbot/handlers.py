@@ -109,7 +109,9 @@ async def _learn_from_message(message: Message, my_id: int):
 # anonymous admins. See the "ONLY REAL USERS" guard inside the handlers below.
 
 
-def _check_group_mention_or_reply(message: Message, my_telegram_id: int, my_username: str) -> tuple[bool, str]:
+def _check_group_mention_or_reply(
+    message: Message, my_telegram_id: int, my_username: str, client: Client = None
+) -> tuple[bool, str]:
     """
     Check if a group message mentions the userbot or is a direct reply to the userbot.
     Returns (should_respond: bool, cleaned_text: str).
@@ -148,6 +150,21 @@ def _check_group_mention_or_reply(message: Message, my_telegram_id: int, my_user
         pattern = re.compile(rf"@{re.escape(my_username)}\b", re.IGNORECASE)
         for match in pattern.finditer(text):
             mention_spans.append(match.span())
+
+    # 4. Check userbot name triggers if called by name
+    if not has_mention and client:
+        try:
+            from Myra.modules.chatbot import _extract_name_triggers
+            for trigger in _extract_name_triggers(client):
+                pattern = re.compile(rf"(?<!\w){re.escape(trigger)}(?!\w)", re.IGNORECASE)
+                matches = list(pattern.finditer(text))
+                if matches:
+                    has_mention = True
+                    for m in matches:
+                        mention_spans.append(m.span())
+                    break
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug(f"Userbot name trigger check failed: {exc}")
 
     if not has_mention:
         return False, ""
@@ -246,7 +263,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
             LOGGER.debug(f"learn(userbot) failed: {exc}")
 
         # Was the userbot addressed?
-        addressed, cleaned_text = _check_group_mention_or_reply(message, my_id, my_username)
+        addressed, cleaned_text = _check_group_mention_or_reply(message, my_id, my_username, client=client)
 
         if not addressed and _group_mode(account) != "all":
             return
