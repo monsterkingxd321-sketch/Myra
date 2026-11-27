@@ -164,7 +164,7 @@ def _is_bot_message(message: Message, me) -> bool:
     return bool((sender and my_id and sender.id == my_id) or getattr(replied, "outgoing", False))
 
 
-def _extract_name_triggers(entity) -> list[str]:
+def _extract_name_triggers(entity, include_default_myra: bool = True) -> list[str]:
     """
     Extract trigger words and phrases from bot's display name or client.
     Handles full name, first name, last name, clean constituent words,
@@ -207,7 +207,7 @@ def _extract_name_triggers(entity) -> list[str]:
             if len(plain_joined) >= 2 and plain_joined not in triggers:
                 triggers.append(plain_joined)
 
-    if "myra" not in [t.lower() for t in triggers]:
+    if include_default_myra and "myra" not in [t.lower() for t in triggers]:
         triggers.append("Myra")
 
     return sorted(list(dict.fromkeys(triggers)), key=lambda s: len(s), reverse=True)

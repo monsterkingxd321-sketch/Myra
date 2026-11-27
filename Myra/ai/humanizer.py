@@ -142,12 +142,16 @@ _FEMININE_RULES = (
     # "kar raha hoon" → "kar rahi hoon"
     (re.compile(rf"\braha\b{_HOON}", re.IGNORECASE), "rahi"),
     (re.compile(r"\braha\s+tha\b", re.IGNORECASE), "rahi thi"),
+    # "main ... kar raha" → "main ... kar rahi"
+    (re.compile(r"\b(mai|main|me)\b([^.!?]{0,30})\braha\b", re.IGNORECASE), r"\1\2rahi"),
     # "karta hoon" → "karti hoon"  (only with a 1st-person verb after it)
     (re.compile(rf"\b(\w{{2,}})ta\b{_HOON}", re.IGNORECASE), r"\1ti"),
     (re.compile(r"(\w{2,})ta\s+tha\b", re.IGNORECASE), r"\1ti thi"),
     # "thak gaya hoon" → "thak gayi hoon"
     (re.compile(rf"\bgaya\b{_HOON}", re.IGNORECASE), "gayi"),
+    (re.compile(r"\bgaya\s+tha\b", re.IGNORECASE), "gayi thi"),
     (re.compile(rf"\baaya\b{_HOON}", re.IGNORECASE), "aayi"),
+    (re.compile(r"\baaya\s+tha\b", re.IGNORECASE), "aayi thi"),
     (re.compile(rf"\bhua\b{_HOON}", re.IGNORECASE), "hui"),
     # future: "karunga" → "karungi", "dunga" → "dungi"
     (re.compile(r"\b(\w+)unga\b", re.IGNORECASE), r"\1ungi"),
@@ -157,7 +161,7 @@ _EMOJI_RE = re.compile(
     "[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\u2764\u2728]"
 )
 
-GIRLY_EMOJIS = ("✨", "❤️", "🥰", "🙈", "💖", "😂", "😌", "🌸", "🤭", "🔥")
+GIRLY_EMOJIS = ("✨", "🥺", "😅", "🙈", "💖", "😂", "😌", "🌸", "🤭", "😹", "🥰", "💕")
 
 
 def feminize(text: str) -> str:
@@ -170,7 +174,7 @@ def feminize(text: str) -> str:
     return out
 
 
-def girly_touch(text: str, chance: float = 0.25) -> str:
+def girly_touch(text: str, chance: float = 0.65) -> str:
     """Occasionally add a cute emoji when the reply has none at all."""
     if not text or _EMOJI_RE.search(text):
         return text

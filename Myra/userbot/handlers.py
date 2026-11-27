@@ -157,7 +157,7 @@ def _check_group_mention_or_reply(
         try:
             from Myra.modules.chatbot import _extract_name_triggers, normalize_fancy_font
             text_plain = normalize_fancy_font(text)
-            for trigger in _extract_name_triggers(client):
+            for trigger in _extract_name_triggers(client, include_default_myra=False):
                 pattern = re.compile(rf"(?<!\w){re.escape(trigger)}(?!\w)", re.IGNORECASE)
                 matches = list(pattern.finditer(text))
                 if matches:
@@ -316,7 +316,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
             if (now - _last_reply_at.get(key, 0.0)) < cooldown_sec:
                 return
 
-            allow_ai = config.AI_GROUP_FALLBACK if (addressed or _group_mode(account) == "all") else config.AI_GROUP_FALLBACK_PLAIN
+            allow_ai = config.AI_GROUP_FALLBACK if addressed else config.AI_GROUP_FALLBACK_PLAIN
             response = await get_chatbot_response(
                 query_text,
                 sticker_id=sticker_id,
