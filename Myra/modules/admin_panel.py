@@ -441,8 +441,14 @@ async def _autochat_side_panel(scope: str) -> tuple[str, InlineKeyboardMarkup]:
         ],
         [InlineKeyboardButton(f"Target: {ac.label_for_target(targets)}",
                               callback_data=f"ad_ac_tg:{scope}")],
-        [_back("ad_ac")],
     ]
+    if scope == "ub":
+        rows.append([
+            InlineKeyboardButton("Userbots Pool", callback_data="ad_userbots"),
+            _back("ad_ac"),
+        ])
+    else:
+        rows.append([_back("ad_ac")])
     return text, InlineKeyboardMarkup(rows)
 
 

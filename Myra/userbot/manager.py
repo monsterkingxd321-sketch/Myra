@@ -69,6 +69,7 @@ class AccountManager:
             LOGGER.info(f"⚙️ Applied default userbot settings to {account_id}")
 
         autochat = account_doc.get("autochat", defaults["autochat"])
+        auto_enabled = account_doc.get("auto_enabled", autochat)
         reply_delay = account_doc.get("reply_delay", defaults["reply_delay"])
         speed_mode = account_doc.get("speed_mode") or defaults["speed_mode"]
         group_mode = account_doc.get("group_mode") or defaults["group_mode"]
@@ -115,6 +116,7 @@ class AccountManager:
                 "added_by": added_by,
                 "scope": scope,
                 "autochat": autochat,
+                "auto_enabled": auto_enabled,
                 "reply_delay": reply_delay,
                 "speed_mode": speed_mode,
                 "group_mode": group_mode,
@@ -158,8 +160,18 @@ class AccountManager:
 
         if account_id in ub_accounts:
             ub_accounts[account_id]["autochat"] = new_state
+            ub_accounts[account_id]["auto_enabled"] = new_state
 
-        await update_account(account_id, {"autochat": new_state})
+        await update_account(account_id, {"autochat": new_state, "auto_enabled": new_state})
+        if new_state:
+            try:
+                from Myra.database import autochat as ac
+                from Myra.services.autochat import autochat_service
+                scope = (ub_accounts.get(account_id) or account_doc or {}).get("scope") or current_scope()
+                await ac.set_ub_enabled(True, scope=scope)
+                autochat_service.reset_timers()
+            except Exception:
+                pass
         return new_state
 
     async def set_speed(self, account_id: str, delay: int, mode: str):
@@ -176,6 +188,15 @@ class AccountManager:
             ub_accounts[account_id]["group_mode"] = mode
         await update_account(account_id, {"group_mode": mode})
         return mode
+
+    async def set_reply_scope(self, account_id: str, reply_scope: str) -> str:
+        """'both', 'groups', or 'private'."""
+        if reply_scope not in ("both", "groups", "private"):
+            reply_scope = "both"
+        if account_id in ub_accounts:
+            ub_accounts[account_id]["reply_scope"] = reply_scope
+        await update_account(account_id, {"reply_scope": reply_scope})
+        return reply_scope
 
     async def set_reply_chance(self, account_id: str, chance):
         """Reply probability 0-100, or None to follow the global value."""

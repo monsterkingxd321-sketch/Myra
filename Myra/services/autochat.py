@@ -304,7 +304,9 @@ class AutoChatService:
 
                 self._ub_next[account_id] = now + self._jitter(settings["interval"])
 
-            targets = await userbot_targets(client, account_id, settings["targets"])
+            targets = await userbot_targets(client, account_id, settings["targets"], force=force)
+            if not targets and not force:
+                targets = await userbot_targets(client, account_id, settings["targets"], force=True)
             if not targets:
                 LOGGER.info(f"⏰ AutoChat userbot [{account_id}] has 0 target groups/chats (mode={settings['targets']})")
                 return
@@ -353,6 +355,21 @@ class AutoChatService:
             except Exception as exc:  # noqa: BLE001
                 LOGGER.debug(f"autochat send_now({account_id}) failed: {exc}")
         return self.sent_total - before
+
+    async def send_now_account(self, account_id: str) -> tuple[int, int]:
+        """Force one AutoChat round right now for a single userbot. Returns (sent, total_targets)."""
+        from Myra.userbot.storage import accounts as ub_accounts
+
+        account = ub_accounts.get(account_id)
+        if not account or account.get("status") != "CONNECTED" or account.get("client") is None:
+            return 0, 0
+        settings = await ac.resolve_account_settings(account)
+        targets = await userbot_targets(account["client"], account_id, settings["targets"], force=True)
+        if not targets:
+            return 0, 0
+        before = self.sent_total
+        await self._ub_tick(account_id, account, force=True)
+        return self.sent_total - before, len(targets)
 
 
 autochat_service = AutoChatService()

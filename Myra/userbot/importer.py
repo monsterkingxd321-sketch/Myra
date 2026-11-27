@@ -569,7 +569,9 @@ async def add_from_session_string(
     await register_userbot_handlers(client, account_id)
 
     try:
+        from Myra.database import autochat as ac
         from Myra.services.autochat import autochat_service
+        await ac.set_ub_enabled(True)
         autochat_service.reset_timers()
     except Exception:
         pass

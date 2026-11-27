@@ -176,20 +176,36 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     btn_text = f"{name} ({user_tag}) [Admin: {added_by_id}] • {status_sym}"
                     keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
+        from Myra.database import autochat as ac
+        ub_auto_on = await ac.get_ub_enabled()
+        ub_interval = await ac.get_ub_interval()
+        ub_targets = await ac.get_ub_targets()
+        text += (
+            f"\n⏰ **AutoChat Loop:** `{'Active' if ub_auto_on else 'Paused'}` "
+            f"({ac.human_interval(ub_interval)} · {ac.label_for_target(ub_targets)})\n"
+        )
+
         notify_enabled = await ai_settings.get_joinreq_notify()
         notify_str = "ON" if notify_enabled else "OFF"
 
         keyboard_rows.append([
-            InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
-            InlineKeyboardButton("Remove Admin", callback_data="ub_manage_admins"),
+            InlineKeyboardButton(f"AutoChat Loop: {'ON' if ub_auto_on else 'OFF'}", callback_data="ub_ac_toggle"),
+            InlineKeyboardButton("Send AutoChat Now", callback_data="ub_ac_now"),
         ])
         keyboard_rows.append([
-            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
+            InlineKeyboardButton("AutoChat Timing", callback_data="ad_ac_ub"),
             InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
         ])
         keyboard_rows.append([
+            InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
             InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
             InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton("Back", callback_data="ad_main"),
         ])
 
         return text, InlineKeyboardMarkup(keyboard_rows)
@@ -369,17 +385,20 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton(autochat_btn_text, callback_data=f"ub_toggle:{account_id}")],
         [
-            InlineKeyboardButton("Speed Settings", callback_data=f"ub_speed:{account_id}"),
-            InlineKeyboardButton("Restart", callback_data=f"ub_restart:{account_id}"),
+            InlineKeyboardButton(f"Group: {group_label}", callback_data=f"ub_gmode:{account_id}"),
+            InlineKeyboardButton(f"In: {scope_label}", callback_data=f"ub_scope:{account_id}"),
         ],
         [
+            InlineKeyboardButton("Speed Settings", callback_data=f"ub_speed:{account_id}"),
+            InlineKeyboardButton("Send AutoChat Now", callback_data=f"ub_sendnow:{account_id}"),
+        ],
+        [
+            InlineKeyboardButton("Restart", callback_data=f"ub_restart:{account_id}"),
             InlineKeyboardButton("Info", callback_data=f"ub_info:{account_id}"),
             InlineKeyboardButton("Remove", callback_data=f"ub_remove:{account_id}"),
         ],
         [InlineKeyboardButton("Back to Accounts List", callback_data="ub_back_main")],
     ])
-
-    return panel_text, markup
 
     return panel_text, markup
 
@@ -798,6 +817,94 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         except Exception:
             pass
+        return
+
+    # Toggle Group Mode (All vs Mention)
+    if data.startswith("ub_gmode:"):
+        account_id = data.split(":", 1)[1]
+        can_manage, acc = await _can_manage_account(user_id, account_id)
+        if not can_manage or not acc:
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        in_mem = ub_accounts.get(account_id, {})
+        cur = in_mem.get("group_mode") or acc.get("group_mode") or "all"
+        new_mode = "mention" if cur == "all" else "all"
+        await userbot_manager.set_group_mode(account_id, new_mode)
+        await query.answer(
+            "Group Reply: All messages" if new_mode == "all" else "Group Reply: Only when tagged",
+            show_alert=True,
+        )
+        text, markup = await _build_userbot_panel(account_id, user_id)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        return
+
+    # Cycle Reply Scope (Both -> Groups -> DMs)
+    if data.startswith("ub_scope:"):
+        account_id = data.split(":", 1)[1]
+        can_manage, acc = await _can_manage_account(user_id, account_id)
+        if not can_manage or not acc:
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        in_mem = ub_accounts.get(account_id, {})
+        cur = in_mem.get("reply_scope") or acc.get("reply_scope") or "both"
+        order = ("both", "groups", "private")
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "both"
+        await userbot_manager.set_reply_scope(account_id, nxt)
+        labels = {"both": "Both (Groups & DMs)", "groups": "Groups Only", "private": "DMs Only"}
+        await query.answer(f"Reply In: {labels[nxt]}", show_alert=True)
+        text, markup = await _build_userbot_panel(account_id, user_id)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        return
+
+    # Send AutoChat Now for this specific userbot
+    if data.startswith("ub_sendnow:"):
+        account_id = data.split(":", 1)[1]
+        can_manage, _ = await _can_manage_account(user_id, account_id)
+        if not can_manage:
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        from Myra.services.autochat import autochat_service
+        sent, total = await autochat_service.send_now_account(account_id)
+        if total == 0:
+            msg = "No groups/chats found for this userbot (or userbot disconnected)."
+        else:
+            msg = f"Sent AutoChat to {sent}/{total} group(s)/chat(s)!"
+        await query.answer(msg, show_alert=True)
+        return
+
+    # Global Userbot AutoChat Loop Toggle from Userbots Pool
+    if data == "ub_ac_toggle":
+        if not await is_admin(user_id):
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        from Myra.database import autochat as ac
+        from Myra.services.autochat import autochat_service
+        new_state = not await ac.get_ub_enabled()
+        await ac.set_ub_enabled(new_state)
+        for aid, acc in list(ub_accounts.items()):
+            acc["auto_enabled"] = new_state
+            if new_state:
+                acc["autochat"] = True
+            await update_account(aid, {"auto_enabled": new_state, **({"autochat": True} if new_state else {})})
+        autochat_service.reset_timers()
+        await query.answer(f"Userbots AutoChat Loop: {'ON' if new_state else 'OFF'}", show_alert=True)
+        text, markup = await _build_main_dashboard(user_id)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        return
+
+    # Global Send AutoChat Now for all userbots from Userbots Pool
+    if data == "ub_ac_now":
+        if not await is_admin(user_id):
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        from Myra.services.autochat import autochat_service
+        from Myra.database.scope import current_scope
+        sent = await autochat_service.send_now("ub", scope=current_scope())
+        await query.answer(f"Sent AutoChat message(s): {sent}", show_alert=True)
         return
 
     # Open Speed Menu
