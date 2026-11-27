@@ -330,6 +330,11 @@ async def respond_like_human(
         # rights, message already gone…) are not ERROR-worthy and used to flood
         # the log at one line per message.
         name = type(exc).__name__.lower()
+        if "peerflood" in name or "peer_flood" in str(exc).lower():
+            _cool_down(chat_id, 900.0)
+            if logger is not None:
+                logger.warning(f"PeerFlood in {chat_id}: cooling down for 15m")
+            return False
         quiet = (
             "filereference" in name
             or "chatwriteforbidden" in name

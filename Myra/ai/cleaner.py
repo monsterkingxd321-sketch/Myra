@@ -50,6 +50,24 @@ _PROMO_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ── Profanity / abuse blocklist (Hinglish + English) ────────────────────────
+PROFANITY_WORDS = (
+    "madarchod", "maderchod", "mc", "bhenchod", "behenchod", "bc", "bhosdike",
+    "bhosdi", "bsdk", "bkl", "chutiya", "chutiye", "chutiyapa", "gandu", "gaandu",
+    "gaand", "gand", "lauda", "laude", "loda", "lode", "lund", "lawda", "lawde",
+    "chut", "choot", "randi", "rand", "harami", "haramkhor", "kamina", "kamine",
+    "kutta", "kutte", "kutti", "kutiya", "suar", "suwar", "jhaatu", "jhatu",
+    "tatti", "chinal", "bhadwa", "bhadwe", "bhadve", "hijra", "chakka", "chhakka",
+    "teri maa", "teri ma", "maa ki", "ma ki", "behen ki", "bhen ki", "mkc", "bkc",
+    "fuck", "fucking", "fucker", "motherfucker", "mf", "bitch", "asshole",
+    "bastard", "slut", "whore", "dick", "pussy", "cock", "cunt", "nigga",
+)
+
+_PROFANITY_RE = re.compile(
+    "|".join(r"\b" + re.escape(w).replace(r"\ ", r"\s+") + r"\b" for w in PROFANITY_WORDS),
+    re.IGNORECASE,
+)
+
 # Phrases that hint a reply is useless even if technically clean.
 _EMPTY_REPLIES = {
     "", ".", "..", "...", "-", "--", "n/a", "na", "none", "null",
@@ -91,6 +109,8 @@ def find_violations(text: str) -> list[str]:
         violations.append("email")
     if _PROMO_RE.search(text):
         violations.append("promo")
+    if _PROFANITY_RE.search(text):
+        violations.append("profanity")
     return violations
 
 
@@ -128,7 +148,7 @@ def clean_text(text: str, max_length: int = 400) -> str:
         line = line.strip()
         if not line:
             continue
-        if INVITE_KEYWORD_RE.search(line) or _PROMO_RE.search(line):
+        if INVITE_KEYWORD_RE.search(line) or _PROMO_RE.search(line) or _PROFANITY_RE.search(line):
             continue
         kept_lines.append(line)
 

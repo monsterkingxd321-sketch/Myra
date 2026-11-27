@@ -174,11 +174,14 @@ async def get_ai_reply(
     if config.AI_DB_FIRST:
         hit = await training.search_reply(text)
         if hit:
-            LOGGER.debug(f"🧠 DB hit ({hit.get('score')}): {text[:40]}")
-            asyncio.create_task(training.bump_usage(text))
-            if hit.get("text"):
-                hit["text"] = _girl_voice(hit["text"])
-            return hit
+            if hit.get("text") and not cleaner.is_clean(hit["text"], allow_emoji_only=True):
+                LOGGER.debug(f"🚫 Skipped unclean/abusive DB hit for: {text[:40]}")
+            else:
+                LOGGER.debug(f"🧠 DB hit ({hit.get('score')}): {text[:40]}")
+                asyncio.create_task(training.bump_usage(text))
+                if hit.get("text"):
+                    hit["text"] = _girl_voice(hit["text"])
+                return hit
 
     # 3. AI fallback — Gemini and/or OpenAI, whichever has a live key
     use_ai = (

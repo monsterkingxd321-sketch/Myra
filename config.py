@@ -178,12 +178,12 @@ AI_QUOTA_COOLDOWN = int(getenv("AI_QUOTA_COOLDOWN", "1800"))
 # "sometimes" instead of to every single message, like a real person.
 AI_GROUP_REPLY_CHANCE = float(getenv("AI_GROUP_REPLY_CHANCE", "85"))
 AI_PRIVATE_REPLY_CHANCE = float(getenv("AI_PRIVATE_REPLY_CHANCE", "100"))
-USERBOT_GROUP_CHANCE = float(getenv("USERBOT_GROUP_CHANCE", "100"))
+USERBOT_GROUP_CHANCE = float(getenv("USERBOT_GROUP_CHANCE", "50"))
 USERBOT_PRIVATE_CHANCE = float(getenv("USERBOT_PRIVATE_CHANCE", "100"))
 
 # Reply to normal group messages (not only @mentions / replies).
-# Set to false if you only want the userbot to answer when it is addressed.
-USERBOT_GROUP_REPLY_ALL = _env_bool("USERBOT_GROUP_REPLY_ALL", True)
+# Default False so userbots only reply when tagged/mentioned/replied (safe from spam limits).
+USERBOT_GROUP_REPLY_ALL = _env_bool("USERBOT_GROUP_REPLY_ALL", False)
 
 # Typing speed used for the "typing…" indicator (words per minute).
 HUMAN_TYPING_WPM = float(getenv("HUMAN_TYPING_WPM", "220"))
@@ -208,8 +208,8 @@ AUTOCHAT_BOT_INTERVAL_MS = int(getenv("AUTOCHAT_BOT_INTERVAL_MS", "900000"))   #
 AUTOCHAT_BOT_TARGETS = getenv("AUTOCHAT_BOT_TARGETS", "groups")               # groups|dm|both
 
 # Userbot defaults
-AUTOCHAT_UB_ENABLED = _env_bool("AUTOCHAT_UB_ENABLED", True)
-AUTOCHAT_UB_INTERVAL_MS = int(getenv("AUTOCHAT_UB_INTERVAL_MS", "600000"))    # 10 min
+AUTOCHAT_UB_ENABLED = _env_bool("AUTOCHAT_UB_ENABLED", False)
+AUTOCHAT_UB_INTERVAL_MS = int(getenv("AUTOCHAT_UB_INTERVAL_MS", "900000"))    # 15 min
 AUTOCHAT_UB_TARGETS = getenv("AUTOCHAT_UB_TARGETS", "groups")                 # groups|dm|both
 
 # ── Cloned bots ────────────────────────────────────────────────────────────

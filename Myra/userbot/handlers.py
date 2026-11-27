@@ -18,6 +18,7 @@ from Myra import mongo, config, LOGGER
 # Per-(account_id, chat_id) locks and cooldown tracking to prevent concurrency bursts & flood limits
 _chat_locks: dict[tuple[str, int], asyncio.Lock] = {}
 _last_reply_at: dict[tuple[str, int], float] = {}
+_last_account_reply_at: dict[str, float] = {}
 
 
 def _get_chat_lock(account_id: str, chat_id: int) -> asyncio.Lock:
@@ -292,12 +293,15 @@ async def register_userbot_handlers(client: Client, account_id: str):
             LOGGER.debug(f"Userbot ({account_id}) already responding in chat {chat_id}, skipping rapid message")
             return
 
-        # ── 4. CHAT COOLDOWN CHECK ───────────────────────────────────────
+        # ── 4. CHAT & ACCOUNT COOLDOWN CHECK ─────────────────────────────
         delay_ms = await _resolve_delay_ms(account)
-        cooldown_sec = max(2.0, delay_ms / 1000.0)
+        cooldown_sec = max(5.0, delay_ms / 1000.0)
         now = time.time()
         if (now - _last_reply_at.get(key, 0.0)) < cooldown_sec:
             LOGGER.debug(f"Userbot ({account_id}) cooldown in chat {chat_id}, skipping")
+            return
+        if (now - _last_account_reply_at.get(account_id, 0.0)) < 3.0:
+            LOGGER.debug(f"Userbot ({account_id}) global anti-limit cooldown, skipping")
             return
 
         # ── 5. % REPLY CHANCE CHECK (BEFORE GEMINI/DB LOOKUP) ────────────
@@ -324,7 +328,9 @@ async def register_userbot_handlers(client: Client, account_id: str):
             try:
                 sent = await _reply_like_human(c, message, account, response, chance=100.0)
                 if sent:
-                    _last_reply_at[key] = time.time()
+                    now_ts = time.time()
+                    _last_reply_at[key] = now_ts
+                    _last_account_reply_at[account_id] = now_ts
                     LOGGER.info(f"💬 Userbot ({account_id}) replied in group {chat_id}")
             except Exception as e:
                 LOGGER.error(f"⚠️ Userbot ({account_id}) group reply error: {e}")

@@ -45,14 +45,15 @@ async def random_line() -> str:
     candidates = []
     if training.TRAINING is not None:
         try:
+            from Myra.ai import cleaner
             docs = await training.TRAINING.aggregate(
-                [{"$sample": {"size": 12}}]
-            ).to_list(length=12)
+                [{"$sample": {"size": 16}}]
+            ).to_list(length=16)
             for doc in docs:
                 if (doc.get("check") or "none") == "sticker":
                     continue
                 text = (doc.get("text") or "").strip()
-                if 3 <= len(text) <= MAX_LINE_LEN * 2:
+                if 3 <= len(text) <= MAX_LINE_LEN * 2 and cleaner.is_clean(text):
                     candidates.append(text)
         except Exception as exc:  # noqa: BLE001
             LOGGER.debug(f"autochat: random_line query failed: {exc}")
@@ -319,14 +320,12 @@ class AutoChatService:
                 return
 
             label = account.get("name") or account_id
-            # Send to all target groups/chats (up to 20 per tick with round-robin rotation)
-            if len(targets) <= 20:
-                batch_targets = targets
-            else:
-                cursor_key = f"ub:{account_id}"
-                start = self._cursors.get(cursor_key, 0)
-                batch_targets = [targets[(start + offset) % len(targets)] for offset in range(20)]
-                self._cursors[cursor_key] = (start + 20) % len(targets)
+            # Safe anti-limit batch: max 3 targets per tick with 6-12s human gap
+            ub_batch = min(3, len(targets))
+            cursor_key = f"ub:{account_id}"
+            start = self._cursors.get(cursor_key, 0)
+            batch_targets = [targets[(start + offset) % len(targets)] for offset in range(ub_batch)]
+            self._cursors[cursor_key] = (start + ub_batch) % len(targets)
 
             for idx, chat_id in enumerate(batch_targets):
                 text = await random_line()
@@ -335,7 +334,7 @@ class AutoChatService:
                 if not ok and self.last_flood_wait != prev_fw:
                     break
                 if idx + 1 < len(batch_targets):
-                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                    await asyncio.sleep(random.uniform(6.0, 12.0))
         finally:
             reset_scope(token)
 
