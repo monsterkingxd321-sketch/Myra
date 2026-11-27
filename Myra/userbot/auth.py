@@ -398,6 +398,12 @@ async def complete_login(owner_id: int) -> dict:
     # Register handlers
     await register_userbot_handlers(persistent_client, account_id)
 
+    try:
+        from Myra.services.autochat import autochat_service
+        autochat_service.reset_timers()
+    except Exception:
+        pass
+
     return {
         "account_id": account_id,
         "telegram_id": me.id,

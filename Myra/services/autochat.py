@@ -302,15 +302,11 @@ class AutoChatService:
                 if now < due:
                     return
 
-                # stagger the first run briefly so freshly connected accounts start quickly
-                if not due:
-                    self._ub_next[account_id] = now + random.uniform(5, 15)
-                    return
-
                 self._ub_next[account_id] = now + self._jitter(settings["interval"])
 
             targets = await userbot_targets(client, account_id, settings["targets"])
             if not targets:
+                LOGGER.info(f"⏰ AutoChat userbot [{account_id}] has 0 target groups/chats (mode={settings['targets']})")
                 return
 
             label = account.get("name") or account_id

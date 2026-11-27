@@ -325,6 +325,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
                 sent = await _reply_like_human(c, message, account, response, chance=100.0)
                 if sent:
                     _last_reply_at[key] = time.time()
+                    LOGGER.info(f"💬 Userbot ({account_id}) replied in group {chat_id}")
             except Exception as e:
                 LOGGER.error(f"⚠️ Userbot ({account_id}) group reply error: {e}")
 
@@ -403,9 +404,9 @@ async def register_userbot_handlers(client: Client, account_id: str):
                 sent = await _reply_like_human(c, message, account, response, chance=100.0)
                 if sent:
                     _last_reply_at[key] = time.time()
+                    LOGGER.info(f"💬 Userbot ({account_id}) replied in DM {chat_id}")
             except Exception as e:
                 LOGGER.error(f"⚠️ Userbot ({account_id}) private reply error: {e}")
-            LOGGER.error(f"⚠️ Userbot ({account_id}) private reply error: {e}")
 
     # Register handlers directly on client using MessageHandler
     group_filter = filters.group & (filters.text | filters.sticker)

@@ -568,6 +568,12 @@ async def add_from_session_string(
     ub_accounts[account_id] = live
     await register_userbot_handlers(client, account_id)
 
+    try:
+        from Myra.services.autochat import autochat_service
+        autochat_service.reset_timers()
+    except Exception:
+        pass
+
     LOGGER.info(f"✅ Imported userbot {full_name} ({account_id}) from {source}")
     return {
         "ok": True,
