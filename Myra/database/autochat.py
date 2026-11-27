@@ -160,6 +160,8 @@ async def resolve_account_settings(account: dict, scope: str = None) -> dict:
     enabled = account.get("auto_enabled")
     if enabled is None:
         enabled = await get_ub_enabled(scope)
+    if account.get("autochat") is False:
+        enabled = False
 
     interval = account.get("auto_interval_ms")
     if interval is None:

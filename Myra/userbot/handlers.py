@@ -312,7 +312,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
             if (now - _last_reply_at.get(key, 0.0)) < cooldown_sec:
                 return
 
-            allow_ai = config.AI_GROUP_FALLBACK if addressed else config.AI_GROUP_FALLBACK_PLAIN
+            allow_ai = config.AI_GROUP_FALLBACK if (addressed or _group_mode(account) == "all") else config.AI_GROUP_FALLBACK_PLAIN
             response = await get_chatbot_response(
                 query_text,
                 sticker_id=sticker_id,

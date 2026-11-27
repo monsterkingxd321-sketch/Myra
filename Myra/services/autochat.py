@@ -286,6 +286,9 @@ class AutoChatService:
         if client is None or account.get("status") != "CONNECTED":
             return
 
+        if not account.get("autochat", True) and not force:
+            return
+
         token = set_scope(account.get("scope") or current_scope())
         try:
             settings = await ac.resolve_account_settings(account)
@@ -299,9 +302,9 @@ class AutoChatService:
                 if now < due:
                     return
 
-                # stagger the first run of each account so they never fire together
+                # stagger the first run briefly so freshly connected accounts start quickly
                 if not due:
-                    self._ub_next[account_id] = now + random.uniform(5, 90)
+                    self._ub_next[account_id] = now + random.uniform(5, 15)
                     return
 
                 self._ub_next[account_id] = now + self._jitter(settings["interval"])
@@ -311,9 +314,23 @@ class AutoChatService:
                 return
 
             label = account.get("name") or account_id
-            text = await random_line()
-            for chat_id in self._pick(targets, f"ub:{account_id}"):
-                await self._send(client, chat_id, text, False, label)
+            # Send to all target groups/chats (up to 20 per tick with round-robin rotation)
+            if len(targets) <= 20:
+                batch_targets = targets
+            else:
+                cursor_key = f"ub:{account_id}"
+                start = self._cursors.get(cursor_key, 0)
+                batch_targets = [targets[(start + offset) % len(targets)] for offset in range(20)]
+                self._cursors[cursor_key] = (start + 20) % len(targets)
+
+            for idx, chat_id in enumerate(batch_targets):
+                text = await random_line()
+                prev_fw = self.last_flood_wait
+                ok = await self._send(client, chat_id, text, False, label)
+                if not ok and self.last_flood_wait != prev_fw:
+                    break
+                if idx + 1 < len(batch_targets):
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
         finally:
             reset_scope(token)
 
