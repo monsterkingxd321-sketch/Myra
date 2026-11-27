@@ -168,7 +168,7 @@ class AutoChatService:
         else:
             self._failures[key] = self._failures.get(key, 0) + 1
 
-    async def _send(self, client, chat_id: int, text: str, is_bot: bool, label: str) -> bool:
+    async def _send(self, client, chat_id: int, text: str, is_bot: bool, label: str, account_id: str = None) -> bool:
         key = (label, chat_id)
         if not self._allowed(key):
             return False
@@ -191,6 +191,13 @@ class AutoChatService:
             self._mark(key, False)
             self.failed_total += 1
             LOGGER.debug(f"autochat send failed [{label}] {chat_id}: {exc}")
+            if not is_bot:
+                try:
+                    from Myra.userbot.manager import is_logout_error, userbot_manager
+                    if is_logout_error(exc) and account_id:
+                        await userbot_manager.mark_logged_out(account_id, str(exc))
+                except Exception:
+                    pass
             return False
 
         self._mark(key, True)
@@ -324,7 +331,7 @@ class AutoChatService:
             for idx, chat_id in enumerate(batch_targets):
                 text = await random_line()
                 prev_fw = self.last_flood_wait
-                ok = await self._send(client, chat_id, text, False, label)
+                ok = await self._send(client, chat_id, text, False, label, account_id=account_id)
                 if not ok and self.last_flood_wait != prev_fw:
                     break
                 if idx + 1 < len(batch_targets):

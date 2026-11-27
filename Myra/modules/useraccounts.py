@@ -79,6 +79,19 @@ async def _can_manage_account(user_id: int, account_id: str) -> tuple[bool, dict
 
 # ---------- UI Builders ----------
 
+def _format_ub_status(account_id: str, acc: dict, in_mem: dict) -> tuple[str, str]:
+    """Return (short_badge, full_status_label) for a userbot account."""
+    raw_status = (in_mem.get("status") or acc.get("status") or "DISCONNECTED").upper()
+    autochat_state = in_mem.get("autochat", acc.get("autochat", True))
+    if raw_status in ("LOGGED_OUT", "AUTH_REQUIRED"):
+        return "[Logged Out]", "Logged Out (Re-login required)"
+    if raw_status == "ERROR":
+        return "[Error]", "Error (Restart / Re-login)"
+    if account_id not in ub_accounts or raw_status != "CONNECTED":
+        return "[Offline]", "Disconnected"
+    return ("[✓]" if autochat_state else "[x]"), "Connected"
+
+
 async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMarkup]:
     """
     Build the main userbot management dashboard.
@@ -132,7 +145,9 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                         phone = f"+{str(c_me.phone_number).lstrip('+')}"
                         in_mem["phone"] = phone
                 p_str = f" · Phone: `{phone}`" if phone else ""
-                text += f"• {name} ({u_str}){p_str}\n"
+                badge, full_st = _format_ub_status(account_id, acc, in_mem)
+                st_note = f" · **{full_st}**" if full_st != "Connected" else ""
+                text += f"• {name} ({u_str}){p_str}{st_note}\n"
             text += "\nSelect any userbot below to open its dedicated settings & controls:\n"
 
             # Owner accounts section
@@ -150,8 +165,7 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                             phone = f"+{str(c_me.phone_number).lstrip('+')}"
                             in_mem["phone"] = phone
                     user_tag = phone if phone else (f"@{username}" if username else f"#{idx}")
-                    autochat_state = in_mem.get("autochat", acc.get("autochat", True))
-                    status_sym = "[✓]" if autochat_state else "[x]"
+                    status_sym, _ = _format_ub_status(account_id, acc, in_mem)
                     btn_text = f"{name} ({user_tag}) • {status_sym}"
                     keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
@@ -171,8 +185,7 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                             in_mem["phone"] = phone
                     user_tag = phone if phone else (f"@{username}" if username else f"#{idx}")
                     added_by_id = acc.get("added_by", "Unknown")
-                    autochat_state = in_mem.get("autochat", acc.get("autochat", True))
-                    status_sym = "[✓]" if autochat_state else "[x]"
+                    status_sym, _ = _format_ub_status(account_id, acc, in_mem)
                     btn_text = f"{name} ({user_tag}) [Admin: {added_by_id}] • {status_sym}"
                     keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
@@ -259,7 +272,9 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     phone = f"+{str(c_me.phone_number).lstrip('+')}"
                     in_mem["phone"] = phone
             p_str = f" · Phone: `{phone}`" if phone else ""
-            text += f"{idx}. {name} ({u_str}){p_str}\n"
+            _, full_st = _format_ub_status(account_id, acc, in_mem)
+            st_note = f" · **{full_st}**" if full_st != "Connected" else ""
+            text += f"{idx}. {name} ({u_str}){p_str}{st_note}\n"
         text += "\nSelect a userbot below to open settings:"
 
         keyboard_rows = []
@@ -278,8 +293,7 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
                     in_mem["phone"] = phone
             user_tag = phone if phone else (f"@{username}" if username else f"#{index}")
 
-            autochat_state = in_mem.get("autochat", acc.get("autochat", True))
-            status_sym = "[✓]" if autochat_state else "[x]"
+            status_sym, _ = _format_ub_status(account_id, acc, in_mem)
 
             btn_text = f"{index}. {name} ({user_tag}) • {status_sym}"
             keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
@@ -332,8 +346,9 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
 
     phone_display = phone if phone else "Not available"
 
-    is_connected = account_id in ub_accounts and ub_accounts[account_id].get("status") == "CONNECTED"
-    status_str = "Connected" if is_connected else "Disconnected"
+    await userbot_manager.check_account_alive(account_id)
+    in_mem = ub_accounts.get(account_id, {})
+    _, status_str = _format_ub_status(account_id, acc, in_mem)
 
     autochat_state = in_mem.get("autochat", acc.get("autochat", True))
     autochat_label = "ON" if autochat_state else "OFF"
@@ -1093,8 +1108,9 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             phone = f"+{phone}"
         phone_display = phone if phone else "Not available"
 
-        is_conn = account_id in ub_accounts and ub_accounts[account_id].get("status") == "CONNECTED"
-        status_str = "Connected [✓]" if is_conn else "Disconnected [x]"
+        await userbot_manager.check_account_alive(account_id)
+        in_mem = ub_accounts.get(account_id, {})
+        _, status_str = _format_ub_status(account_id, acc, in_mem)
         autochat_state = in_mem.get("autochat", acc.get("autochat", True))
         autochat_str = "ON" if autochat_state else "OFF"
         delay = in_mem.get("reply_delay", acc.get("reply_delay", 0))

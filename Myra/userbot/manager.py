@@ -20,6 +20,30 @@ from Myra.userbot.storage import (
 )
 
 
+_LOGOUT_MARKERS = (
+    "authkeyunregistered",
+    "auth_key_unregistered",
+    "sessionrevoked",
+    "session_revoked",
+    "sessionexpired",
+    "session_expired",
+    "userdeactivated",
+    "user_deactivated",
+    "unauthorized",
+    "authkeyduplicated",
+    "auth_key_duplicated",
+)
+
+
+def is_logout_error(exc: Exception) -> bool:
+    """True when an exception indicates the userbot session was logged out or revoked."""
+    if exc is None:
+        return False
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    return any(m in name or m in msg for m in _LOGOUT_MARKERS)
+
+
 class AccountManager:
     """Manages multiple userbot accounts lifecycle and settings."""
 
@@ -44,7 +68,8 @@ class AccountManager:
                 await self._restore_account(account_doc)
             except Exception as e:
                 LOGGER.error(f"⚠️ Failed to restore userbot account {account_id}: {e}")
-                await update_account(account_id, {"status": "ERROR"}, scope=scope)
+                status_val = "LOGGED_OUT" if is_logout_error(e) else "ERROR"
+                await update_account(account_id, {"status": status_val}, scope=scope)
 
         # Start background cleanup task for expired auth flows
         from Myra.userbot.auth import cleanup_expired_flows
@@ -144,7 +169,37 @@ class AccountManager:
 
         except Exception as e:
             LOGGER.error(f"❌ Error starting userbot {account_id}: {e}")
-            await update_account(account_id, {"status": "ERROR"}, scope=scope)
+            status_val = "LOGGED_OUT" if is_logout_error(e) else "ERROR"
+            await update_account(account_id, {"status": status_val}, scope=scope)
+
+    async def mark_logged_out(self, account_id: str, reason: str = ""):
+        """Mark a userbot as logged out in memory and MongoDB."""
+        scope = (ub_accounts.get(account_id) or {}).get("scope") or current_scope()
+        if account_id in ub_accounts:
+            ub_accounts[account_id]["status"] = "LOGGED_OUT"
+        try:
+            await update_account(account_id, {"status": "LOGGED_OUT"}, scope=scope)
+        except Exception:
+            pass
+        if reason:
+            LOGGER.warning(f"🚪 Userbot {account_id} marked LOGGED_OUT: {reason}")
+
+    async def check_account_alive(self, account_id: str) -> str:
+        """Verify live session status when viewing an account; returns status string."""
+        in_mem = ub_accounts.get(account_id)
+        if not in_mem:
+            doc = await get_account(account_id)
+            return (doc or {}).get("status") or "DISCONNECTED"
+        status = in_mem.get("status") or "DISCONNECTED"
+        client = in_mem.get("client")
+        if status == "CONNECTED" and client is not None:
+            try:
+                await client.get_me()
+            except Exception as exc:
+                if is_logout_error(exc):
+                    await self.mark_logged_out(account_id, str(exc))
+                    return "LOGGED_OUT"
+        return status
 
     async def toggle_autochat(self, account_id: str) -> bool:
         """Toggle AutoChat state for an account in-memory and in MongoDB."""

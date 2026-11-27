@@ -11,7 +11,7 @@ from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMa
 from Myra import Myra, mongo, config, LOGGER
 from Myra.database import MYRA, training
 from Myra.database.admins import is_admin, is_owner
-from Myra.database.scope import scope_match
+from Myra.database.scope import scope_field, scope_match
 from Myra.database.settings import get_group_reply_mode, set_group_reply_mode
 from Myra.ai import cleaner
 from Myra.ai.audience import is_real_user
@@ -358,8 +358,10 @@ async def chatbot_group(client: Client, message: Message):
 
 
 async def _build_group_mode_panel(chat_id: int, chat_title: str) -> tuple[str, InlineKeyboardMarkup]:
-    """Build mode selection menu for group chats."""
+    """Build mode selection & chatbot ON/OFF menu for group chats."""
     current_mode = await get_group_reply_mode(chat_id)
+    disabled = bool(await MYRA.find_one({"chat_id": chat_id, **scope_match()})) if MYRA is not None else False
+    cb_status = "OFF [x]" if disabled else "ON [✓]"
 
     modes_map = {
         "tag_only": "Tag & Reply Only (Default)",
@@ -371,9 +373,12 @@ async def _build_group_mode_panel(chat_id: int, chat_title: str) -> tuple[str, I
     text = (
         "╭───「 Reply Mode Settings 」\n"
         f"│ Group: {chat_title}\n"
-        f"│ Active: {current_label}\n"
+        f"│ Chatbot: {cb_status}\n"
+        f"│ Mode: {current_label}\n"
         "╰──────────────────────\n\n"
-        "Select replying mode for this group:\n\n"
+        "Select chatbot status & replying mode for this group:\n\n"
+        "• Chatbot: ON / OFF\n"
+        "  Enable or disable bot replies in this group.\n\n"
         "• Tag & Reply Only (Default)\n"
         "  Replies only when tagged (@mention or name) or replied to.\n\n"
         "• All Messages\n"
@@ -389,6 +394,16 @@ async def _build_group_mode_panel(chat_id: int, chat_title: str) -> tuple[str, I
         return InlineKeyboardButton(f"{tick}{label}", callback_data=f"gmode:{chat_id}:{code}")
 
     markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "✓ Chatbot: ON" if not disabled else "Chatbot: ON",
+                callback_data=f"gmode:{chat_id}:cb_on",
+            ),
+            InlineKeyboardButton(
+                "✓ Chatbot: OFF" if disabled else "Chatbot: OFF",
+                callback_data=f"gmode:{chat_id}:cb_off",
+            ),
+        ],
         [_btn("tag_only", "Tag & Reply Only")],
         [_btn("all", "All Messages")],
         [_btn("medium", "Medium (Balanced)")],
@@ -470,6 +485,27 @@ async def group_mode_callback(client: Client, query: CallbackQuery):
         except Exception:
             pass
         return await query.answer()
+
+    if action in ("cb_on", "cb_off"):
+        if MYRA is not None:
+            if action == "cb_on":
+                await MYRA.delete_one({"chat_id": chat_id, **scope_match()})
+                alert_msg = "✓ Chatbot enabled in this group"
+            else:
+                if not await MYRA.find_one({"chat_id": chat_id, **scope_match()}):
+                    await MYRA.insert_one({"chat_id": chat_id, **scope_field()})
+                alert_msg = "Chatbot disabled in this group"
+        else:
+            alert_msg = "Database unavailable"
+        text, markup = await _build_group_mode_panel(
+            chat_id,
+            query.message.chat.title if query.message and query.message.chat else "Group",
+        )
+        try:
+            await query.message.edit_text(text, reply_markup=markup)
+        except Exception:
+            pass
+        return await query.answer(alert_msg, show_alert=False)
 
     if action in ("tag_only", "all", "medium"):
         await set_group_reply_mode(chat_id, action)
