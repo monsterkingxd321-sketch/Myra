@@ -154,49 +154,47 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
     clones = len(clones_list)
 
     text = (
-        "╭───「 Master Admin Panel 」\n"
+        "╭───「 Admin Control Panel 」\n"
         f"│ Bot: {_bot_title()}\n"
-        f"│ Owner: {owner_str} │ Admins: {len(admins_list)}\n"
+        f"│ Owner: {owner_str}  │  Admins: {len(admins_list)}\n"
         "╰──────────────────────\n\n"
-        "Audience & Reach\n"
-        f"• Groups: {chats:,}\n"
-        f"• Private DMs: {users:,}\n"
-        f"• Userbots Active: {len(my_accounts)} (DMs: {totals.get('userbot_dm', 0):,})\n\n"
-        "AI & Database\n"
-        f"• Mode: {'Hybrid (DB + Gemini/GPT)' if ai.get('active') else 'Offline (DB Brain)'}\n"
-        f"• API Key Pool: {ai.get('active', 0)}/{ai.get('total', 0)} active\n"
-        f"• Trained Memory: {db.get('total', 0):,} pairs\n\n"
-        "Live Automation\n"
+        "Overview\n"
+        f"• Groups: {chats:,}  │  DMs: {users:,}\n"
+        f"• Userbots: {len(my_accounts)} (DMs: {totals.get('userbot_dm', 0):,})  │  Clones: {clones}\n\n"
+        "AI & Memory\n"
+        f"• Engine: {'Hybrid (DB + AI)' if ai.get('active') else 'DB Brain (Offline)'} ({ai.get('active', 0)}/{ai.get('total', 0)} keys)\n"
+        f"• Trained Pairs: {db.get('total', 0):,}\n\n"
+        "Automation\n"
         f"• Bot AutoChat: {'Active' if bot_auto else 'Paused'} ({ac.human_interval(bot_interval)})\n"
-        f"• Userbot AutoChat: {'Active' if ub_auto else 'Paused'} ({ac.human_interval(ub_interval)})\n"
+        f"• Userbot Loop: {'Active' if ub_auto else 'Paused'} ({ac.human_interval(ub_interval)})\n"
         "──────────────────────\n"
-        "Select a module below:"
+        "Choose a section:"
     )
 
     rows = [
         [
-            InlineKeyboardButton("Broadcast Hub", callback_data="ad_bc"),
-            InlineKeyboardButton("AutoChat Hub", callback_data="ad_ac"),
+            InlineKeyboardButton(f"Userbots ({len(my_accounts)})", callback_data="ad_userbots"),
+            InlineKeyboardButton(f"Clones ({clones})", callback_data="ad_clones"),
+        ],
+        [
+            InlineKeyboardButton("Broadcast", callback_data="ad_bc"),
+            InlineKeyboardButton("AutoChat", callback_data="ad_ac"),
+        ],
+        [
+            InlineKeyboardButton("AI & Keys", callback_data="ad_ai"),
+            InlineKeyboardButton("Behaviour", callback_data="ad_behaviour"),
         ],
         [
             InlineKeyboardButton(f"Admins ({len(admins_list)})", callback_data="ad_admins"),
             InlineKeyboardButton("Group Requests", callback_data="ad_jr"),
         ],
         [
-            InlineKeyboardButton("Userbots Pool", callback_data="ad_userbots"),
             InlineKeyboardButton("Import Sessions", callback_data="ad_import"),
+            InlineKeyboardButton("Button Style", callback_data="ad_btn_style"),
         ],
         [
-            InlineKeyboardButton("AI & API Keys", callback_data="ad_ai"),
-            InlineKeyboardButton("Reply Behaviour", callback_data="ad_behaviour"),
-        ],
-        [
-            InlineKeyboardButton(f"Clones ({clones})", callback_data="ad_clones"),
-            InlineKeyboardButton("System Stats", callback_data="ad_stats"),
-        ],
-        [
-            InlineKeyboardButton("Clean Database", callback_data="ad_clean"),
-            InlineKeyboardButton("Button Styling", callback_data="ad_btn_style"),
+            InlineKeyboardButton("Stats", callback_data="ad_stats"),
+            InlineKeyboardButton("Clean DB", callback_data="ad_clean"),
         ],
         [
             InlineKeyboardButton("Refresh", callback_data="ad_main"),

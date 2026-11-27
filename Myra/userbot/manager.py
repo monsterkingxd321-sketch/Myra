@@ -100,6 +100,7 @@ class AccountManager:
         group_mode = account_doc.get("group_mode") or defaults["group_mode"]
         reply_chance = account_doc.get("reply_chance")
         reply_scope = account_doc.get("reply_scope") or defaults.get("reply_scope", "both")
+        action_mode = account_doc.get("action_mode") or defaults.get("action_mode", "chat")
 
         added_by = account_doc.get("added_by")
         if not added_by and config.OWNER_ID:
@@ -147,6 +148,7 @@ class AccountManager:
                 "group_mode": group_mode,
                 "reply_chance": reply_chance,
                 "reply_scope": reply_scope,
+                "action_mode": action_mode,
                 "status": "CONNECTED",
             }
 
@@ -252,6 +254,15 @@ class AccountManager:
             ub_accounts[account_id]["reply_scope"] = reply_scope
         await update_account(account_id, {"reply_scope": reply_scope})
         return reply_scope
+
+    async def set_action_mode(self, account_id: str, action_mode: str) -> str:
+        """'chat' (reply only), 'react' (emoji reaction only), or 'both' (chat + react)."""
+        if action_mode not in ("chat", "react", "both"):
+            action_mode = "chat"
+        if account_id in ub_accounts:
+            ub_accounts[account_id]["action_mode"] = action_mode
+        await update_account(account_id, {"action_mode": action_mode})
+        return action_mode
 
     async def set_reply_chance(self, account_id: str, chance):
         """Reply probability 0-100, or None to follow the global value."""

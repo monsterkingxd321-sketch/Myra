@@ -19,6 +19,81 @@ from Myra import mongo, config, LOGGER
 _chat_locks: dict[tuple[str, int], asyncio.Lock] = {}
 _last_reply_at: dict[tuple[str, int], float] = {}
 _last_account_reply_at: dict[str, float] = {}
+_last_react_at: dict[tuple[str, int], float] = {}
+_last_account_react_at: dict[str, float] = {}
+_chat_reactions_cache: dict[int, tuple[float, list[str]]] = {}
+
+_POSITIVE_REACTIONS = [
+    "❤️", "👍", "🔥", "🥰", "👏", "🤩", "🎉", "😁", "💯", "👌", "💖", "✨",
+]
+_NEGATIVE_REACTIONS = {
+    "👎", "💔", "😡", "🤬", "💩", "🤮", "😢", "😭", "👿", "💀", "☠️", "🖕", "😤", "🤢", "🤡",
+}
+
+
+async def _get_available_positive_reactions(client: Client, chat_id: int) -> list[str]:
+    """Return positive reaction emojis allowed in *chat_id* (cached 5 min)."""
+    now = time.time()
+    cached = _chat_reactions_cache.get(chat_id)
+    if cached and (now - cached[0]) < 300:
+        return cached[1]
+
+    allowed = list(_POSITIVE_REACTIONS)
+    try:
+        chat = await client.get_chat(chat_id)
+        avail = getattr(chat, "available_reactions", None)
+        if avail is not None:
+            if getattr(avail, "all_are_enabled", False):
+                allowed = list(_POSITIVE_REACTIONS)
+            elif getattr(avail, "reactions", None) is not None:
+                chat_emojis = [
+                    getattr(r, "emoji", None)
+                    for r in avail.reactions
+                    if getattr(r, "emoji", None)
+                ]
+                pos = [e for e in chat_emojis if e in _POSITIVE_REACTIONS]
+                if not pos:
+                    pos = [e for e in chat_emojis if e not in _NEGATIVE_REACTIONS]
+                allowed = pos
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.debug(f"Could not fetch available_reactions for {chat_id}: {exc}")
+
+    _chat_reactions_cache[chat_id] = (now, allowed)
+    return allowed
+
+
+async def _react_to_group_message(client: Client, message: Message, account_id: str) -> bool:
+    """Put a positive Telegram message reaction (not a text reply) on a group message."""
+    import random
+
+    chat_id = message.chat.id
+    now = time.time()
+    key = (account_id, chat_id)
+    if (now - _last_react_at.get(key, 0.0)) < 4.0:
+        return False
+    if (now - _last_account_react_at.get(account_id, 0.0)) < 2.5:
+        return False
+
+    choices = await _get_available_positive_reactions(client, chat_id)
+    if not choices:
+        return False
+
+    emoji = random.choice(choices)
+    try:
+        await client.send_reaction(chat_id, message.id, emoji)
+        now_ts = time.time()
+        _last_react_at[key] = now_ts
+        _last_account_react_at[account_id] = now_ts
+        LOGGER.info(f"✨ Userbot ({account_id}) reacted {emoji} in group {chat_id}")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        name = type(exc).__name__.lower()
+        if "reactioninvalid" in name or "reaction_invalid" in str(exc).lower():
+            _chat_reactions_cache.pop(chat_id, None)
+        elif "flood" in name or "peerflood" in name:
+            _last_account_react_at[account_id] = time.time() + 120.0
+        LOGGER.debug(f"Userbot ({account_id}) reaction skipped in {chat_id}: {exc}")
+        return False
 
 
 def _get_chat_lock(account_id: str, chat_id: int) -> asyncio.Lock:
@@ -270,6 +345,13 @@ async def register_userbot_handlers(client: Client, account_id: str):
             await _learn_from_message(message, my_id)
         except Exception as exc:  # noqa: BLE001
             LOGGER.debug(f"learn(userbot) failed: {exc}")
+
+        # ── ACTION MODE: 'chat' | 'react' | 'both' ───────────────────────
+        action_mode = account.get("action_mode") or "chat"
+        if action_mode in ("react", "both"):
+            await _react_to_group_message(c, message, account_id)
+        if action_mode == "react":
+            return
 
         # Was the userbot addressed?
         addressed, cleaned_text = _check_group_mention_or_reply(message, my_id, my_username, client=client)

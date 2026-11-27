@@ -32,6 +32,7 @@ DEFAULT_REPLY_DELAY = 5000
 DEFAULT_GROUP_MODE = "mention"
 DEFAULT_REPLY_CHANCE = None
 DEFAULT_REPLY_SCOPE = "both"
+DEFAULT_ACTION_MODE = "chat"
 
 
 def default_account_settings() -> dict:
@@ -48,6 +49,7 @@ def default_account_settings() -> dict:
         "group_mode": DEFAULT_GROUP_MODE,
         "reply_chance": DEFAULT_REPLY_CHANCE,
         "reply_scope": DEFAULT_REPLY_SCOPE,
+        "action_mode": DEFAULT_ACTION_MODE,
         "settings_version": ACCOUNT_SETTINGS_VERSION,
     }
 

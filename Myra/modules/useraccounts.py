@@ -118,11 +118,10 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
         admins_list = await get_admins()
 
         text = (
-            "👑 **MASTER USERBOT DASHBOARD (Owner View)**\n\n"
-            f"📦 **Total Connected Accounts:** `{total_count}`\n"
-            f"👑 **Owner Accounts:** `{len(owner_accs)}`\n"
-            f"👥 **Admin Accounts:** `{len(admin_accs)}`\n"
-            f"🛡 **Authorized Admins:** `{len(admins_list)}`\n\n"
+            "╭───「 Userbots Pool 」\n"
+            f"│ Connected: {total_count}  │  Owner: {len(owner_accs)}  │  Admin: {len(admin_accs)}\n"
+            f"│ Authorized Admins: {len(admins_list)}\n"
+            "╰──────────────────────\n\n"
         )
 
         keyboard_rows = []
@@ -373,6 +372,14 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
     }
     scope_label = scope_label_map.get(_scope, "Both")
 
+    _action = in_mem.get("action_mode") or acc.get("action_mode") or "chat"
+    action_label_map = {
+        "chat": "Chat Only",
+        "react": "React Only (Positive)",
+        "both": "Chat + React",
+    }
+    action_label = action_label_map.get(_action, "Chat Only")
+
     added_by = acc.get("added_by")
     owner_id = owner_id_sync()
     if added_by and owner_id and int(added_by) == owner_id:
@@ -384,21 +391,22 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
 
     panel_text = (
         f"╭───「 Userbot: {name} 」\n"
-        f"│ ID: {telegram_id}\n"
-        f"│ Username: {username_str}\n"
-        f"│ Phone: {phone_display}\n"
-        f"│ Added By: {creator_str}\n"
-        f"│ Connection: {status_str}\n"
-        f"│ AutoChat: {autochat_label}\n"
-        f"│ Reply Speed: {speed_label}\n"
-        f"│ Reply In: {scope_label}\n"
-        f"│ Group Reply: {group_label}\n"
-        f"│ Reply Chance: {chance_label}\n"
-        f"╰──────────────────────"
+        f"│ ID: {telegram_id}  │  {username_str}\n"
+        f"│ Phone: {phone_display}  │  By: {creator_str}\n"
+        f"│ Status: {status_str}\n"
+        "╰──────────────────────\n\n"
+        f"• AutoChat: **{autochat_label}**\n"
+        f"• Action Mode: **{action_label}**\n"
+        f"• Group Reply: **{group_label}**\n"
+        f"• Reply In: **{scope_label}**\n"
+        f"• Speed: **{speed_label}**  │  Chance: **{chance_label}**"
     )
 
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton(autochat_btn_text, callback_data=f"ub_toggle:{account_id}")],
+        [
+            InlineKeyboardButton(autochat_btn_text, callback_data=f"ub_toggle:{account_id}"),
+            InlineKeyboardButton(f"Mode: {action_label}", callback_data=f"ub_action:{account_id}"),
+        ],
         [
             InlineKeyboardButton(f"Group: {group_label}", callback_data=f"ub_gmode:{account_id}"),
             InlineKeyboardButton(f"In: {scope_label}", callback_data=f"ub_scope:{account_id}"),
@@ -827,6 +835,30 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         new_state = await userbot_manager.toggle_autochat(account_id)
         state_str = "ON" if new_state else "OFF"
         await query.answer(f"✅ AutoChat is now {state_str}!", show_alert=True)
+        text, markup = await _build_userbot_panel(account_id, user_id)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        return
+
+    # Cycle Action Mode (Chat Only -> React Only -> Chat + React)
+    if data.startswith("ub_action:"):
+        account_id = data.split(":", 1)[1]
+        can_manage, acc = await _can_manage_account(user_id, account_id)
+        if not can_manage or not acc:
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        in_mem = ub_accounts.get(account_id, {})
+        cur = in_mem.get("action_mode") or acc.get("action_mode") or "chat"
+        order = ("chat", "react", "both")
+        nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else "chat"
+        await userbot_manager.set_action_mode(account_id, nxt)
+        labels = {
+            "chat": "Chat Only",
+            "react": "React Only (Positive Emoji)",
+            "both": "Chat + Emoji React",
+        }
+        await query.answer(f"Action Mode: {labels[nxt]}", show_alert=True)
         text, markup = await _build_userbot_panel(account_id, user_id)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
