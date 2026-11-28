@@ -83,13 +83,15 @@ def _format_ub_status(account_id: str, acc: dict, in_mem: dict) -> tuple[str, st
     """Return (short_badge, full_status_label) for a userbot account."""
     raw_status = (in_mem.get("status") or acc.get("status") or "DISCONNECTED").upper()
     autochat_state = in_mem.get("autochat", acc.get("autochat", True))
+    action_mode = in_mem.get("action_mode") or acc.get("action_mode") or "chat"
     if raw_status in ("LOGGED_OUT", "AUTH_REQUIRED"):
         return "[Logged Out]", "Logged Out (Re-login required)"
     if raw_status == "ERROR":
         return "[Error]", "Error (Restart / Re-login)"
     if account_id not in ub_accounts or raw_status != "CONNECTED":
         return "[Offline]", "Disconnected"
-    return ("[✓]" if autochat_state else "[x]"), "Connected"
+    mode_tag = {"chat": "Chat", "react": "React", "both": "Chat+React"}.get(action_mode, "Chat")
+    return (f"[✓ {mode_tag}]" if autochat_state or action_mode == "react" else f"[x {mode_tag}]"), "Connected"
 
 
 async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -457,7 +459,8 @@ async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, In
         f"• Action Mode: **{action_label}**\n"
         f"• Group Reply: **{group_label}**\n"
         f"• Reply In: **{scope_label}**\n"
-        f"• Speed: **{speed_label}**  │  Chance: **{chance_label}**"
+        f"• Speed: **{speed_label}**  │  Chance: **{chance_label}**\n\n"
+        "Tip: Tap **Mode** below to switch Chat Only / React Only / Chat + React."
     )
 
     markup = InlineKeyboardMarkup([

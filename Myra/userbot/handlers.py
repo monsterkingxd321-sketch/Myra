@@ -39,28 +39,30 @@ async def _get_available_positive_reactions(client: Client, chat_id: int) -> lis
     if cached and (now - cached[0]) < 300:
         return cached[1]
 
-    allowed = []
+    allowed = list(_POSITIVE_REACTIONS)
     try:
         chat = await client.get_chat(chat_id)
         avail = getattr(chat, "available_reactions", None)
-        if avail is None:
-            # Reactions disabled in this group (ChatReactionsNone)
-            allowed = []
-        elif getattr(avail, "all_are_enabled", False):
-            allowed = list(_POSITIVE_REACTIONS)
-        elif getattr(avail, "reactions", None):
-            chat_emojis = [
-                getattr(r, "emoji", None)
-                for r in avail.reactions
-                if getattr(r, "emoji", None)
-            ]
-            pos = [e for e in chat_emojis if e in _POSITIVE_REACTIONS]
-            if not pos:
-                pos = [e for e in chat_emojis if e not in _NEGATIVE_REACTIONS]
-            allowed = pos
+        if avail is not None:
+            if getattr(avail, "all_are_enabled", False):
+                allowed = list(_POSITIVE_REACTIONS)
+            elif getattr(avail, "reactions", None) is not None:
+                chat_emojis = [
+                    getattr(r, "emoji", None)
+                    for r in avail.reactions
+                    if getattr(r, "emoji", None)
+                ]
+                if not chat_emojis:
+                    # Explicitly restricted to empty list -> reactions disabled
+                    allowed = []
+                else:
+                    pos = [e for e in chat_emojis if e in _POSITIVE_REACTIONS]
+                    if not pos:
+                        pos = [e for e in chat_emojis if e not in _NEGATIVE_REACTIONS]
+                    allowed = pos
     except Exception as exc:  # noqa: BLE001
         LOGGER.debug(f"Could not fetch available_reactions for {chat_id}: {exc}")
-        allowed = []
+        allowed = list(_POSITIVE_REACTIONS)
 
     _chat_reactions_cache[chat_id] = (now, allowed)
     return allowed
