@@ -69,7 +69,7 @@ async def _get_available_positive_reactions(client: Client, chat_id: int) -> lis
 
 
 async def _react_to_group_message(client: Client, message: Message, account_id: str) -> bool:
-    """Put a positive Telegram message reaction (not a text reply) on a group message."""
+    """Put a positive Telegram message reaction (not a text reply) instantly."""
     import random
 
     chat_id = message.chat.id
@@ -78,22 +78,37 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
     if blocked_until > now:
         return False
 
-    choices = await _get_available_positive_reactions(client, chat_id)
-    if not choices:
-        return False
+    cached = _chat_reactions_cache.get(chat_id)
+    if cached and (now - cached[0]) < 300:
+        choices = cached[1]
+        if not choices:
+            return False
+        tried = [random.choice(choices)] + [e for e in _SAFE_FALLBACK_REACTIONS]
+    else:
+        # Fire immediately with safe fast emojis without waiting for get_chat() RPC
+        first = random.choice(_SAFE_FALLBACK_REACTIONS)
+        tried = [first] + [e for e in _SAFE_FALLBACK_REACTIONS if e != first]
 
-    emoji = random.choice(choices)
-    tried = [emoji] + [e for e in _SAFE_FALLBACK_REACTIONS if e != emoji]
     for candidate in tried:
         try:
             await client.send_reaction(chat_id, message.id, candidate)
+            if not cached:
+                _chat_reactions_cache[chat_id] = (time.time(), list(_POSITIVE_REACTIONS))
             LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in group {chat_id}")
             return True
         except Exception as exc:  # noqa: BLE001
             name = type(exc).__name__.lower()
             err_s = str(exc).lower()
             if "reactioninvalid" in name or "reaction_invalid" in err_s:
-                _chat_reactions_cache.pop(chat_id, None)
+                # Fetch exact allowed emojis for this group once, then retry
+                allowed = await _get_available_positive_reactions(client, chat_id)
+                for alt in allowed:
+                    if alt not in tried:
+                        try:
+                            await client.send_reaction(chat_id, message.id, alt)
+                            return True
+                        except Exception:
+                            continue
                 continue
             if any(k in name or k in err_s for k in ("reactions_disabled", "chatwriteforbidden", "rightforbidden", "userbanned", "channelprivate")):
                 _chat_reactions_cache[chat_id] = (time.time(), [])
@@ -363,17 +378,15 @@ async def register_userbot_handlers(client: Client, account_id: str):
         if raw_text.startswith(("/", "!", "?", ".")):
             return
 
-        # Learn from replies between other users (not the userbot itself)
-        try:
-            await _learn_from_message(message, my_id)
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.debug(f"learn(userbot) failed: {exc}")
-
-        # ── ACTION MODE: 'chat' | 'react' | 'both' ───────────────────────
+        # ── ACTION MODE: fire reaction immediately before any DB work ──────
         if action_mode in ("react", "both"):
             asyncio.create_task(_react_to_group_message(c, message, account_id))
         if action_mode == "react":
             return
+
+        # Learn from replies between other users in background (non-blocking)
+        asyncio.create_task(_learn_from_message(message, my_id))
+
         if not account.get("autochat", True):
             return
         if not message.text and not message.sticker:
