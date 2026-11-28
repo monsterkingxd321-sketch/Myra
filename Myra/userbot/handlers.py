@@ -22,6 +22,7 @@ _last_account_reply_at: dict[str, float] = {}
 _last_react_at: dict[tuple[str, int], float] = {}
 _last_account_react_at: dict[str, float] = {}
 _chat_reactions_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
+_seen_group_chats: set[tuple[str, int]] = set()
 
 _POSITIVE_REACTIONS = [
     "❤️", "👍", "🔥", "🥰", "👏", "🤩", "🎉", "😁", "💯", "👌",
@@ -75,61 +76,71 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
     chat_id = message.chat.id
     ckey = (account_id, chat_id)
     now = time.time()
-    blocked_until = _last_account_react_at.get(account_id, 0.0)
-    if blocked_until > now:
-        return False
-
-    cached = _chat_reactions_cache.get(ckey)
-    if cached and (now - cached[0]) < 300:
-        choices = cached[1]
-        if not choices:
+    try:
+        blocked_until = _last_account_react_at.get(account_id, 0.0)
+        if blocked_until > now:
+            LOGGER.debug(f"⏳ Userbot ({account_id}) reaction cooldown active ({blocked_until - now:.1f}s left)")
             return False
-        tried = [random.choice(choices)] + [e for e in _SAFE_FALLBACK_REACTIONS]
-    else:
-        first = random.choice(_SAFE_FALLBACK_REACTIONS)
-        tried = [first] + [e for e in _SAFE_FALLBACK_REACTIONS if e != first]
 
-    for candidate in tried:
-        try:
-            await client.send_reaction(chat_id, message.id, candidate)
-            if not cached:
-                _chat_reactions_cache[ckey] = (time.time(), list(_POSITIVE_REACTIONS))
-            LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in group {chat_id}")
-            return True
-        except Exception as exc:  # noqa: BLE001
-            name = type(exc).__name__.lower()
-            err_s = str(exc).lower()
-            if "reactioninvalid" in name or "reaction_invalid" in err_s:
-                allowed = await _get_available_positive_reactions(client, account_id, chat_id)
-                for alt in allowed:
-                    if alt not in tried:
-                        try:
-                            await client.send_reaction(chat_id, message.id, alt)
-                            return True
-                        except Exception:
-                            continue
-                continue
-            if any(k in name or k in err_s for k in ("peeridinvalid", "peer_id_invalid", "channelinvalid", "channel_invalid", "chatidinvalid")):
-                try:
-                    async for _ in client.get_dialogs(limit=30):
-                        pass
-                    await client.send_reaction(chat_id, message.id, candidate)
-                    LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in {chat_id} after peer sync")
-                    return True
-                except Exception as retry_exc:  # noqa: BLE001
-                    LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction retry failed in {chat_id}: {retry_exc}")
+        cached = _chat_reactions_cache.get(ckey)
+        if cached and (now - cached[0]) < 300:
+            choices = cached[1]
+            if not choices:
+                LOGGER.warning(f"🚫 Userbot ({account_id}) reactions cached empty/disabled for group {chat_id}")
+                return False
+            tried = [random.choice(choices)] + [e for e in _SAFE_FALLBACK_REACTIONS]
+        else:
+            first = random.choice(_SAFE_FALLBACK_REACTIONS)
+            tried = [first] + [e for e in _SAFE_FALLBACK_REACTIONS if e != first]
+
+        for candidate in tried:
+            try:
+                await client.send_reaction(chat_id, message.id, candidate)
+                if not cached:
+                    _chat_reactions_cache[ckey] = (time.time(), list(_POSITIVE_REACTIONS))
+                LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in group {chat_id}")
+                return True
+            except Exception as exc:  # noqa: BLE001
+                name = type(exc).__name__.lower()
+                err_s = str(exc).lower()
+                if "reactioninvalid" in name or "reaction_invalid" in err_s:
+                    allowed = await _get_available_positive_reactions(client, account_id, chat_id)
+                    for alt in allowed:
+                        if alt not in tried:
+                            try:
+                                await client.send_reaction(chat_id, message.id, alt)
+                                LOGGER.info(f"✨ Userbot ({account_id}) reacted {alt} in group {chat_id}")
+                                return True
+                            except Exception:
+                                continue
+                    LOGGER.warning(f"⚠️ Userbot ({account_id}) ReactionInvalid in {chat_id} for {candidate} (allowed={allowed})")
+                    continue
+                if any(k in name or k in err_s for k in ("peeridinvalid", "peer_id_invalid", "channelinvalid", "channel_invalid", "chatidinvalid")):
+                    try:
+                        async for _ in client.get_dialogs(limit=50):
+                            pass
+                        await client.send_reaction(chat_id, message.id, candidate)
+                        LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in {chat_id} after peer sync")
+                        return True
+                    except Exception as retry_exc:  # noqa: BLE001
+                        LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction retry failed in {chat_id}: {retry_exc}")
+                        return False
+                if any(k in name or k in err_s for k in ("reactions_disabled", "chatwriteforbidden", "rightforbidden", "userbanned", "channelprivate")):
+                    _chat_reactions_cache[ckey] = (time.time(), [])
+                    LOGGER.warning(f"🚫 Userbot ({account_id}) cannot react in {chat_id}: {exc}")
                     return False
-            if any(k in name or k in err_s for k in ("reactions_disabled", "chatwriteforbidden", "rightforbidden", "userbanned", "channelprivate")):
-                _chat_reactions_cache[ckey] = (time.time(), [])
+                if "flood" in name or "peerflood" in name:
+                    wait_s = float(getattr(exc, "value", 60) or 60)
+                    _last_account_react_at[account_id] = time.time() + min(wait_s, 300.0)
+                    LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction flood in {chat_id}: {exc}")
+                    return False
+                LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction failed in {chat_id} ({candidate}): {exc}")
                 return False
-            if "flood" in name or "peerflood" in name:
-                wait_s = float(getattr(exc, "value", 60) or 60)
-                _last_account_react_at[account_id] = time.time() + min(wait_s, 300.0)
-                LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction flood in {chat_id}: {exc}")
-                return False
-            LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction failed in {chat_id} ({candidate}): {exc}")
-            return False
-    return False
+        LOGGER.warning(f"⚠️ Userbot ({account_id}) exhausted all reaction candidates in {chat_id}: {tried}")
+        return False
+    except Exception as outer_exc:  # noqa: BLE001
+        LOGGER.error(f"❌ Userbot ({account_id}) unexpected reaction error in {chat_id}: {outer_exc}", exc_info=True)
+        return False
 
 
 def _get_chat_lock(account_id: str, chat_id: int) -> asyncio.Lock:
@@ -370,6 +381,10 @@ async def register_userbot_handlers(client: Client, account_id: str):
         sender = getattr(message, "from_user", None)
         sender_id = getattr(sender, "id", None)
         is_self = bool(getattr(message, "outgoing", False) or (sender_id is not None and sender_id == my_id))
+        seen_key = (account_id, message.chat.id)
+        if seen_key not in _seen_group_chats:
+            _seen_group_chats.add(seen_key)
+            LOGGER.info(f"👀 Userbot ({account_id}) received group msg in {message.chat.id} (action_mode={action_mode}, is_self={is_self})")
         if action_mode in ("react", "both") and not is_self:
             asyncio.create_task(_react_to_group_message(c, message, account_id))
         if action_mode == "react":

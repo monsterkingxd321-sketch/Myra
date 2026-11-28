@@ -167,6 +167,18 @@ class AccountManager:
             from Myra.userbot.handlers import register_userbot_handlers
             await register_userbot_handlers(client, account_id)
 
+            # Warm up in-memory peer cache so updates & reactions work for all groups
+            async def _warmup_dialogs(cl: Client, aid: str):
+                try:
+                    count = 0
+                    async for _ in cl.get_dialogs(limit=50):
+                        count += 1
+                    LOGGER.debug(f"🔄 Userbot ({aid}) warmed {count} dialog(s)")
+                except Exception as exc:
+                    LOGGER.debug(f"Dialog warmup skipped for {aid}: {exc}")
+
+            asyncio.create_task(_warmup_dialogs(client, account_id))
+
             LOGGER.info(f"✅ Userbot {ub_accounts[account_id]['name']} ({account_id}) connected! (action_mode={action_mode}, group_mode={group_mode})")
 
         except Exception as e:

@@ -1021,11 +1021,7 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
     if data == "ub_all_panel":
         if not await is_admin(user_id):
             return await query.answer("❌ Unauthorized.", show_alert=True)
-        cur_text = (query.message.text or "") if query.message else ""
-        if "Manage All Userbots" in cur_text:
-            text, markup = await _build_all_userbots_panel(user_id)
-        else:
-            text, markup = await _build_main_dashboard(user_id)
+        text, markup = await _build_all_userbots_panel(user_id)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         except Exception:
