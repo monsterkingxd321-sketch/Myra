@@ -1077,6 +1077,7 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             except Exception:
                 pass
             labels = {"chat": "Chat Only", "react": "React Only", "both": "Chat + React"}
+            LOGGER.info(f"⚡ Bulk action_mode='{mode}' set for {count} userbot(s) by {user_id}")
             alert = f"Mode '{labels.get(mode, mode)}' set for {count} userbot(s)!"
         elif data.startswith("ub_all_gmode:"):
             gmode = data.split(":", 1)[1]

@@ -167,7 +167,7 @@ class AccountManager:
             from Myra.userbot.handlers import register_userbot_handlers
             await register_userbot_handlers(client, account_id)
 
-            LOGGER.info(f"✅ Userbot {ub_accounts[account_id]['name']} ({account_id}) connected successfully!")
+            LOGGER.info(f"✅ Userbot {ub_accounts[account_id]['name']} ({account_id}) connected! (action_mode={action_mode}, group_mode={group_mode})")
 
         except Exception as e:
             LOGGER.error(f"❌ Error starting userbot {account_id}: {e}")
