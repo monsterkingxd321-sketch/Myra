@@ -20,9 +20,11 @@ _chat_locks: dict[tuple[str, int], asyncio.Lock] = {}
 _last_reply_at: dict[tuple[str, int], float] = {}
 _last_account_reply_at: dict[str, float] = {}
 _last_react_at: dict[tuple[str, int], float] = {}
+_last_react_sent_at: dict[str, float] = {}
 _last_account_react_at: dict[str, float] = {}
 _chat_reactions_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
 _seen_group_chats: set[tuple[str, int]] = set()
+_MIN_ACCOUNT_REACT_INTERVAL = 1.5
 
 _POSITIVE_REACTIONS = [
     "❤️", "👍", "🔥", "🥰", "👏", "🤩", "🎉", "😁", "💯", "👌",
@@ -81,6 +83,13 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
         if blocked_until > now:
             LOGGER.debug(f"⏳ Userbot ({account_id}) reaction cooldown active ({blocked_until - now:.1f}s left)")
             return False
+
+        # Reserve slot synchronously before any await so concurrent bursts across
+        # 30+ groups cannot fire 40+ SendReaction calls in the same millisecond.
+        last_sent = _last_react_sent_at.get(account_id, 0.0)
+        if (now - last_sent) < _MIN_ACCOUNT_REACT_INTERVAL:
+            return False
+        _last_react_sent_at[account_id] = now
 
         cached = _chat_reactions_cache.get(ckey)
         if cached and (now - cached[0]) < 300:
@@ -386,7 +395,17 @@ async def register_userbot_handlers(client: Client, account_id: str):
             _seen_group_chats.add(seen_key)
             LOGGER.info(f"👀 Userbot ({account_id}) received group msg in {message.chat.id} (action_mode={action_mode}, is_self={is_self})")
         if action_mode in ("react", "both") and not is_self:
-            asyncio.create_task(_react_to_group_message(c, message, account_id))
+            msg_date = getattr(message, "date", None)
+            is_fresh = True
+            if msg_date is not None:
+                try:
+                    ts = msg_date.timestamp() if hasattr(msg_date, "timestamp") else float(msg_date)
+                    if (time.time() - ts) > 20.0:
+                        is_fresh = False
+                except Exception:
+                    pass
+            if is_fresh:
+                asyncio.create_task(_react_to_group_message(c, message, account_id))
         if action_mode == "react":
             return
 
