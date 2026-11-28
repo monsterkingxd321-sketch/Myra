@@ -346,15 +346,6 @@ async def register_userbot_handlers(client: Client, account_id: str):
             return
 
         action_mode = account.get("action_mode") or "chat"
-        # AutoChat ON/OFF check (React-only mode still reacts even if chatting is OFF)
-        if action_mode == "chat" and not account.get("autochat", True):
-            return
-
-        # ── 1. REPLY SCOPE CHECK (Both / Groups Only / DMs Only) ─────────
-        reply_scope = await _resolve_reply_scope(account)
-        if reply_scope == "private":
-            return  # DM-only mode active: ignore group messages
-
         my_id = account["telegram_id"]
         my_username = account.get("username", "")
 
@@ -367,7 +358,25 @@ async def register_userbot_handlers(client: Client, account_id: str):
         except Exception:
             pass
 
-        # ── 2. ONLY REAL USERS ───────────────────────────────────────────
+        # ── ACTION MODE: react on every non-self group message immediately ─
+        sender = getattr(message, "from_user", None)
+        sender_id = getattr(sender, "id", None)
+        is_self = bool(getattr(message, "outgoing", False) or (sender_id is not None and sender_id == my_id))
+        if action_mode in ("react", "both") and not is_self:
+            asyncio.create_task(_react_to_group_message(c, message, account_id))
+        if action_mode == "react":
+            return
+
+        # AutoChat ON/OFF check for chatting
+        if not account.get("autochat", True):
+            return
+
+        # ── 1. REPLY SCOPE CHECK (Both / Groups Only / DMs Only) ─────────
+        reply_scope = await _resolve_reply_scope(account)
+        if reply_scope == "private":
+            return  # DM-only mode active: ignore group messages
+
+        # ── 2. ONLY REAL USERS (for text chatting) ───────────────────────
         # Ignore our own messages, every bot (including the main bot), our
         # other userbot accounts, channel posts and anonymous admins.
         if not await is_real_user(message, my_id=my_id):
@@ -378,17 +387,9 @@ async def register_userbot_handlers(client: Client, account_id: str):
         if raw_text.startswith(("/", "!", "?", ".")):
             return
 
-        # ── ACTION MODE: fire reaction immediately before any DB work ──────
-        if action_mode in ("react", "both"):
-            asyncio.create_task(_react_to_group_message(c, message, account_id))
-        if action_mode == "react":
-            return
-
         # Learn from replies between other users in background (non-blocking)
         asyncio.create_task(_learn_from_message(message, my_id))
 
-        if not account.get("autochat", True):
-            return
         if not message.text and not message.sticker:
             return
 
