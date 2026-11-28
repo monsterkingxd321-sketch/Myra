@@ -24,8 +24,9 @@ _last_account_react_at: dict[str, float] = {}
 _chat_reactions_cache: dict[int, tuple[float, list[str]]] = {}
 
 _POSITIVE_REACTIONS = [
-    "❤️", "👍", "🔥", "🥰", "👏", "🤩", "🎉", "😁", "💯", "👌", "💖", "✨",
+    "❤️", "👍", "🔥", "🥰", "👏", "🤩", "🎉", "😁", "💯", "👌",
 ]
+_SAFE_FALLBACK_REACTIONS = ("❤️", "👍", "🔥")
 _NEGATIVE_REACTIONS = {
     "👎", "💔", "😡", "🤬", "💩", "🤮", "😢", "😭", "👿", "💀", "☠️", "🖕", "😤", "🤢", "🤡",
 }
@@ -45,7 +46,7 @@ async def _get_available_positive_reactions(client: Client, chat_id: int) -> lis
         if avail is not None:
             if getattr(avail, "all_are_enabled", False):
                 allowed = list(_POSITIVE_REACTIONS)
-            elif getattr(avail, "reactions", None) is not None:
+            elif getattr(avail, "reactions", None):
                 chat_emojis = [
                     getattr(r, "emoji", None)
                     for r in avail.reactions
@@ -54,7 +55,8 @@ async def _get_available_positive_reactions(client: Client, chat_id: int) -> lis
                 pos = [e for e in chat_emojis if e in _POSITIVE_REACTIONS]
                 if not pos:
                     pos = [e for e in chat_emojis if e not in _NEGATIVE_REACTIONS]
-                allowed = pos
+                if pos:
+                    allowed = pos
     except Exception as exc:  # noqa: BLE001
         LOGGER.debug(f"Could not fetch available_reactions for {chat_id}: {exc}")
 
@@ -69,9 +71,9 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
     chat_id = message.chat.id
     now = time.time()
     key = (account_id, chat_id)
-    if (now - _last_react_at.get(key, 0.0)) < 4.0:
+    if (now - _last_react_at.get(key, 0.0)) < 1.5:
         return False
-    if (now - _last_account_react_at.get(account_id, 0.0)) < 2.5:
+    if (now - _last_account_react_at.get(account_id, 0.0)) < 1.0:
         return False
 
     choices = await _get_available_positive_reactions(client, chat_id)
@@ -79,21 +81,27 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
         return False
 
     emoji = random.choice(choices)
-    try:
-        await client.send_reaction(chat_id, message.id, emoji)
-        now_ts = time.time()
-        _last_react_at[key] = now_ts
-        _last_account_react_at[account_id] = now_ts
-        LOGGER.info(f"✨ Userbot ({account_id}) reacted {emoji} in group {chat_id}")
-        return True
-    except Exception as exc:  # noqa: BLE001
-        name = type(exc).__name__.lower()
-        if "reactioninvalid" in name or "reaction_invalid" in str(exc).lower():
-            _chat_reactions_cache.pop(chat_id, None)
-        elif "flood" in name or "peerflood" in name:
-            _last_account_react_at[account_id] = time.time() + 120.0
-        LOGGER.debug(f"Userbot ({account_id}) reaction skipped in {chat_id}: {exc}")
-        return False
+    tried = [emoji] + [e for e in _SAFE_FALLBACK_REACTIONS if e != emoji]
+    for candidate in tried:
+        try:
+            await client.send_reaction(chat_id, message.id, candidate)
+            now_ts = time.time()
+            _last_react_at[key] = now_ts
+            _last_account_react_at[account_id] = now_ts
+            LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in group {chat_id}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            name = type(exc).__name__.lower()
+            err_s = str(exc).lower()
+            if "reactioninvalid" in name or "reaction_invalid" in err_s:
+                _chat_reactions_cache.pop(chat_id, None)
+                continue
+            if "flood" in name or "peerflood" in name:
+                _last_account_react_at[account_id] = time.time() + 120.0
+                return False
+            LOGGER.debug(f"Userbot ({account_id}) reaction failed in {chat_id}: {exc}")
+            return False
+    return False
 
 
 def _get_chat_lock(account_id: str, chat_id: int) -> asyncio.Lock:
@@ -317,8 +325,9 @@ async def register_userbot_handlers(client: Client, account_id: str):
         if not account:
             return
 
-        # AutoChat ON/OFF check
-        if not account.get("autochat", True):
+        action_mode = account.get("action_mode") or "chat"
+        # AutoChat ON/OFF check (React-only mode still reacts even if chatting is OFF)
+        if action_mode == "chat" and not account.get("autochat", True):
             return
 
         # ── 1. REPLY SCOPE CHECK (Both / Groups Only / DMs Only) ─────────
@@ -347,10 +356,13 @@ async def register_userbot_handlers(client: Client, account_id: str):
             LOGGER.debug(f"learn(userbot) failed: {exc}")
 
         # ── ACTION MODE: 'chat' | 'react' | 'both' ───────────────────────
-        action_mode = account.get("action_mode") or "chat"
         if action_mode in ("react", "both"):
             await _react_to_group_message(c, message, account_id)
         if action_mode == "react":
+            return
+        if not account.get("autochat", True):
+            return
+        if not message.text and not message.sticker:
             return
 
         # Was the userbot addressed?
@@ -497,7 +509,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
                 LOGGER.error(f"⚠️ Userbot ({account_id}) private reply error: {e}")
 
     # Register handlers directly on client using MessageHandler
-    group_filter = filters.group & (filters.text | filters.sticker)
+    group_filter = filters.group & ~filters.service
     private_filter = filters.private & (filters.text | filters.sticker)
 
     client.add_handler(MessageHandler(_within_scope(group_autochat_handler), group_filter), group=1)

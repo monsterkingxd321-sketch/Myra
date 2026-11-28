@@ -65,10 +65,14 @@ async def maybe_react_positive(client: Client, message: Message):
         raw_text = message.text or message.caption or ""
         if is_positive_message(raw_text):
             chosen_emoji = random.choice(REACTION_CHOICES)
-            if hasattr(message, "react"):
-                await message.react(chosen_emoji)
-            elif hasattr(client, "send_reaction"):
-                await client.send_reaction(message.chat.id, message.id, chosen_emoji)
+            for candidate in [chosen_emoji, "❤️", "👍", "🔥"]:
+                try:
+                    await client.send_reaction(message.chat.id, message.id, candidate)
+                    return
+                except Exception as exc:
+                    if "reaction" in str(exc).lower():
+                        continue
+                    return
     except Exception:
         pass
 

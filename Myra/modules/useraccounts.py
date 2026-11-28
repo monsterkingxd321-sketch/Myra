@@ -201,22 +201,23 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
         notify_str = "ON" if notify_enabled else "OFF"
 
         keyboard_rows.append([
+            InlineKeyboardButton("Manage All Userbots", callback_data="ub_all_panel"),
+            InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
+        ])
+        keyboard_rows.append([
             InlineKeyboardButton(f"AutoChat Loop: {'ON' if ub_auto_on else 'OFF'}", callback_data="ub_ac_toggle"),
             InlineKeyboardButton("Send AutoChat Now", callback_data="ub_ac_now"),
         ])
         keyboard_rows.append([
             InlineKeyboardButton("AutoChat Timing", callback_data="ad_ac_ub"),
-            InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
+            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
         ])
         keyboard_rows.append([
             InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
             InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
-            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
             InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),
-        ])
-        keyboard_rows.append([
             InlineKeyboardButton("Back", callback_data="ad_main"),
         ])
 
@@ -298,19 +299,76 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
         keyboard_rows.append([
-            InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
-            InlineKeyboardButton("Remove Admin", callback_data="ub_manage_admins"),
-        ])
-        keyboard_rows.append([
-            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
+            InlineKeyboardButton("Manage All Userbots", callback_data="ub_all_panel"),
             InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
         ])
         keyboard_rows.append([
+            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
             InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
+        ])
+        keyboard_rows.append([
             InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),
+            InlineKeyboardButton("Back", callback_data="ad_main"),
         ])
 
         return text, InlineKeyboardMarkup(keyboard_rows)
+
+
+async def _build_all_userbots_panel(viewer_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """Bulk management panel to configure ALL userbots at once."""
+    if is_owner(viewer_id):
+        accs = await get_served_accounts()
+    else:
+        accs = await get_accounts_by_user(viewer_id)
+
+    connected_count = sum(
+        1 for a in accs
+        if a.get("account_id") in ub_accounts and ub_accounts[a["account_id"]].get("status") == "CONNECTED"
+    )
+    text = (
+        "╭───「 Manage All Userbots 」\n"
+        f"│ Total Accounts: {len(accs)}  │  Connected: {connected_count}\n"
+        "╰──────────────────────\n\n"
+        "Apply any setting below to **all** your userbots in one tap:\n\n"
+        "• **AutoChat:** Turn chatting ON or OFF for all\n"
+        "• **Mode:** Chat Only / React Only / Chat + React\n"
+        "• **Group:** All Messages vs Tagged Only\n"
+        "• **Scope:** Both / Groups Only / DMs Only\n"
+        "• **Speed:** Fast (0s) / Medium (5s) / Slow (10s)"
+    )
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("All AutoChat: ON", callback_data="ub_all_ac:on"),
+            InlineKeyboardButton("All AutoChat: OFF", callback_data="ub_all_ac:off"),
+        ],
+        [
+            InlineKeyboardButton("Chat Only", callback_data="ub_all_action:chat"),
+            InlineKeyboardButton("React Only", callback_data="ub_all_action:react"),
+            InlineKeyboardButton("Chat + React", callback_data="ub_all_action:both"),
+        ],
+        [
+            InlineKeyboardButton("Group: All Msgs", callback_data="ub_all_gmode:all"),
+            InlineKeyboardButton("Group: Tagged Only", callback_data="ub_all_gmode:mention"),
+        ],
+        [
+            InlineKeyboardButton("In: Both", callback_data="ub_all_scope:both"),
+            InlineKeyboardButton("In: Groups", callback_data="ub_all_scope:groups"),
+            InlineKeyboardButton("In: DMs", callback_data="ub_all_scope:private"),
+        ],
+        [
+            InlineKeyboardButton("Speed: Fast", callback_data="ub_all_speed:fast"),
+            InlineKeyboardButton("Medium", callback_data="ub_all_speed:medium"),
+            InlineKeyboardButton("Slow", callback_data="ub_all_speed:slow"),
+        ],
+        [
+            InlineKeyboardButton("Send AutoChat Now", callback_data="ub_ac_now"),
+            InlineKeyboardButton("Restart All", callback_data="ub_all_restart"),
+        ],
+        [
+            InlineKeyboardButton("Back to Userbots", callback_data="ub_back_main"),
+        ],
+    ])
+    return text, markup
 
 
 async def _build_userbot_panel(account_id: str, viewer_id: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -952,6 +1010,84 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         from Myra.database.scope import current_scope
         sent = await autochat_service.send_now("ub", scope=current_scope())
         await query.answer(f"Sent AutoChat message(s): {sent}", show_alert=True)
+        return
+
+    # ── Manage All Userbots Together ───────────────────────────────────────
+    if data == "ub_all_panel":
+        if not await is_admin(user_id):
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        text, markup = await _build_all_userbots_panel(user_id)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        await query.answer()
+        return
+
+    if data.startswith(("ub_all_ac:", "ub_all_action:", "ub_all_gmode:", "ub_all_scope:", "ub_all_speed:")) or data == "ub_all_restart":
+        if not await is_admin(user_id):
+            return await query.answer("❌ Unauthorized.", show_alert=True)
+        target_accs = await get_served_accounts() if is_owner(user_id) else await get_accounts_by_user(user_id)
+        if not target_accs:
+            return await query.answer("No userbot accounts found.", show_alert=True)
+
+        count = 0
+        if data.startswith("ub_all_ac:"):
+            state = data.split(":", 1)[1] == "on"
+            for a in target_accs:
+                aid = a["account_id"]
+                if aid in ub_accounts:
+                    ub_accounts[aid]["autochat"] = state
+                    ub_accounts[aid]["auto_enabled"] = state
+                await update_account(aid, {"autochat": state, "auto_enabled": state})
+                count += 1
+            alert = f"AutoChat {'ON' if state else 'OFF'} for {count} userbot(s)!"
+        elif data.startswith("ub_all_action:"):
+            mode = data.split(":", 1)[1]
+            for a in target_accs:
+                await userbot_manager.set_action_mode(a["account_id"], mode)
+                count += 1
+            labels = {"chat": "Chat Only", "react": "React Only", "both": "Chat + React"}
+            alert = f"Mode '{labels.get(mode, mode)}' set for {count} userbot(s)!"
+        elif data.startswith("ub_all_gmode:"):
+            gmode = data.split(":", 1)[1]
+            for a in target_accs:
+                await userbot_manager.set_group_mode(a["account_id"], gmode)
+                count += 1
+            alert = f"Group mode '{'All Msgs' if gmode == 'all' else 'Tagged Only'}' set for {count} userbot(s)!"
+        elif data.startswith("ub_all_scope:"):
+            rscope = data.split(":", 1)[1]
+            for a in target_accs:
+                await userbot_manager.set_reply_scope(a["account_id"], rscope)
+                count += 1
+            alert = f"Reply scope '{rscope}' set for {count} userbot(s)!"
+        elif data.startswith("ub_all_speed:"):
+            sp = data.split(":", 1)[1]
+            dmap = {"fast": 0, "medium": 5000, "slow": 10000}
+            delay = dmap.get(sp, 5000)
+            for a in target_accs:
+                await userbot_manager.set_speed(a["account_id"], delay=delay, mode=sp)
+                count += 1
+            alert = f"Speed '{sp}' set for {count} userbot(s)!"
+        else:  # ub_all_restart
+            await query.answer("Restarting all userbots...", show_alert=False)
+            for a in target_accs:
+                if await userbot_manager.restart_account(a["account_id"]):
+                    count += 1
+            alert = f"Restarted {count}/{len(target_accs)} userbot(s)!"
+
+        text, markup = await _build_all_userbots_panel(user_id)
+        try:
+            await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
+        except Exception:
+            pass
+        if data != "ub_all_restart":
+            await query.answer(alert, show_alert=True)
+        else:
+            try:
+                await query.message.reply_text(alert)
+            except Exception:
+                pass
         return
 
     # Open Speed Menu
