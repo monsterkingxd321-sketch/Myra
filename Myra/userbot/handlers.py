@@ -72,10 +72,8 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
 
     chat_id = message.chat.id
     now = time.time()
-    key = (account_id, chat_id)
-    if (now - _last_react_at.get(key, 0.0)) < 1.5:
-        return False
-    if (now - _last_account_react_at.get(account_id, 0.0)) < 1.0:
+    blocked_until = _last_account_react_at.get(account_id, 0.0)
+    if blocked_until > now:
         return False
 
     choices = await _get_available_positive_reactions(client, chat_id)
@@ -87,9 +85,6 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
     for candidate in tried:
         try:
             await client.send_reaction(chat_id, message.id, candidate)
-            now_ts = time.time()
-            _last_react_at[key] = now_ts
-            _last_account_react_at[account_id] = now_ts
             LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in group {chat_id}")
             return True
         except Exception as exc:  # noqa: BLE001
@@ -102,7 +97,8 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
                 _chat_reactions_cache[chat_id] = (time.time(), [])
                 return False
             if "flood" in name or "peerflood" in name:
-                _last_account_react_at[account_id] = time.time() + 120.0
+                wait_s = float(getattr(exc, "value", 60) or 60)
+                _last_account_react_at[account_id] = time.time() + min(wait_s, 300.0)
                 return False
             LOGGER.debug(f"Userbot ({account_id}) reaction failed in {chat_id}: {exc}")
             return False
@@ -372,7 +368,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
 
         # ── ACTION MODE: 'chat' | 'react' | 'both' ───────────────────────
         if action_mode in ("react", "both"):
-            await _react_to_group_message(c, message, account_id)
+            asyncio.create_task(_react_to_group_message(c, message, account_id))
         if action_mode == "react":
             return
         if not account.get("autochat", True):
