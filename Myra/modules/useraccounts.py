@@ -203,20 +203,8 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
         notify_str = "ON" if notify_enabled else "OFF"
 
         keyboard_rows.append([
-            InlineKeyboardButton("Manage All Userbots", callback_data="ub_all_panel"),
+            InlineKeyboardButton("Manage All", callback_data="ub_all_panel"),
             InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
-        ])
-        keyboard_rows.append([
-            InlineKeyboardButton(f"AutoChat Loop: {'ON' if ub_auto_on else 'OFF'}", callback_data="ub_ac_toggle"),
-            InlineKeyboardButton("Send AutoChat Now", callback_data="ub_ac_now"),
-        ])
-        keyboard_rows.append([
-            InlineKeyboardButton("AutoChat Timing", callback_data="ad_ac_ub"),
-            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
-        ])
-        keyboard_rows.append([
-            InlineKeyboardButton("Add Admin", callback_data="ub_add_admin_prompt"),
-            InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
             InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),
@@ -301,12 +289,8 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
         keyboard_rows.append([
-            InlineKeyboardButton("Manage All Userbots", callback_data="ub_all_panel"),
+            InlineKeyboardButton("Manage All", callback_data="ub_all_panel"),
             InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
-        ])
-        keyboard_rows.append([
-            InlineKeyboardButton(f"Invite Notify: {notify_str}", callback_data="ub_toggle_notify"),
-            InlineKeyboardButton("Manage Admins", callback_data="ub_manage_admins"),
         ])
         keyboard_rows.append([
             InlineKeyboardButton("Refresh", callback_data="ub_main_refresh"),

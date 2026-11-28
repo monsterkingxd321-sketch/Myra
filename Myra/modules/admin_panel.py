@@ -154,51 +154,58 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
     clones = len(clones_list)
 
     text = (
-        "╭───「 Admin Control Panel 」\n"
+        "╭───「 Admin Panel 」\n"
         f"│ Bot: {_bot_title()}\n"
-        f"│ Owner: {owner_str}  │  Admins: {len(admins_list)}\n"
-        "╰──────────────────────\n\n"
-        "Status\n"
-        f"• Groups: {chats:,}  │  DMs: {users:,}\n"
-        f"• Userbots: {len(my_accounts)}  │  Clones: {clones}\n"
-        f"• AI: {'Hybrid (DB + AI)' if ai.get('active') else 'DB Only'} ({ai.get('active', 0)}/{ai.get('total', 0)} keys · {db.get('total', 0):,} pairs)\n"
-        f"• AutoChat: Bot {'ON' if bot_auto else 'OFF'} · Userbots {'ON' if ub_auto else 'OFF'}\n\n"
-        "Quick Setup\n"
-        "1. **Userbots Setup** -> Add account & set Mode (`Chat` / `React` / `Both`)\n"
-        "2. **Manage All Userbots** -> Ek sath sab userbots control karo\n"
-        "3. **AI & Keys** -> Gemini/OpenAI key add karo\n"
-        "──────────────────────"
+        f"│ Groups: {chats:,}  │  Userbots: {len(my_accounts)}  │  Clones: {clones}\n"
+        f"│ AI: {'ON' if ai.get('active') else 'OFF'} ({ai.get('active', 0)}/{ai.get('total', 0)} keys)  │  Memory: {db.get('total', 0):,}\n"
+        "╰──────────────────────"
     )
 
     rows = [
         [
-            InlineKeyboardButton(f"Userbots Setup ({len(my_accounts)})", callback_data="ad_userbots"),
-            InlineKeyboardButton("Manage All Userbots", callback_data="ub_all_panel"),
+            InlineKeyboardButton(f"Userbots ({len(my_accounts)})", callback_data="ad_userbots"),
+            InlineKeyboardButton(f"Clones ({clones})", callback_data="ad_clones"),
         ],
         [
-            InlineKeyboardButton(f"Cloned Bots ({clones})", callback_data="ad_clones"),
             InlineKeyboardButton("Broadcast", callback_data="ad_bc"),
+            InlineKeyboardButton("AutoChat", callback_data="ad_ac"),
         ],
         [
-            InlineKeyboardButton("AI & API Keys", callback_data="ad_ai"),
-            InlineKeyboardButton("AutoChat Schedule", callback_data="ad_ac"),
-        ],
-        [
-            InlineKeyboardButton("Bot Behaviour", callback_data="ad_behaviour"),
-            InlineKeyboardButton("Group Requests", callback_data="ad_jr"),
-        ],
-        [
-            InlineKeyboardButton(f"Admins ({len(admins_list)})", callback_data="ad_admins"),
-            InlineKeyboardButton("Import Sessions", callback_data="ad_import"),
-        ],
-        [
-            InlineKeyboardButton("Button Style", callback_data="ad_btn_style"),
-            InlineKeyboardButton("Stats", callback_data="ad_stats"),
-            InlineKeyboardButton("Clean DB", callback_data="ad_clean"),
+            InlineKeyboardButton("AI Keys", callback_data="ad_ai"),
+            InlineKeyboardButton("More Settings", callback_data="ad_more"),
         ],
         [
             InlineKeyboardButton("Refresh", callback_data="ad_main"),
             InlineKeyboardButton("Close", callback_data="ad_close"),
+        ],
+    ]
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def _more_panel() -> tuple[str, InlineKeyboardMarkup]:
+    """Secondary admin tools (kept out of the main screen to keep /admin clean)."""
+    admins_list = await adminsdb.get_admins()
+    text = (
+        "╭───「 More Settings 」\n"
+        "│ Additional controls & maintenance\n"
+        "╰──────────────────────"
+    )
+    rows = [
+        [
+            InlineKeyboardButton(f"Admins ({len(admins_list)})", callback_data="ad_admins"),
+            InlineKeyboardButton("Group Requests", callback_data="ad_jr"),
+        ],
+        [
+            InlineKeyboardButton("Bot Behaviour", callback_data="ad_behaviour"),
+            InlineKeyboardButton("Button Style", callback_data="ad_btn_style"),
+        ],
+        [
+            InlineKeyboardButton("Import Sessions", callback_data="ad_import"),
+            InlineKeyboardButton("Stats", callback_data="ad_stats"),
+        ],
+        [
+            InlineKeyboardButton("Clean DB", callback_data="ad_clean"),
+            _back(),
         ],
     ]
     return text, InlineKeyboardMarkup(rows)
@@ -985,6 +992,10 @@ async def admin_panel_callbacks(client: Myra, query: CallbackQuery):
     # ── main ───────────────────────────────────────────────────────────────
     if data == "ad_main":
         await show(await _main_panel())
+        return
+
+    if data == "ad_more":
+        await show(await _more_panel())
         return
 
     if data == "ad_close":
