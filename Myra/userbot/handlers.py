@@ -21,7 +21,7 @@ _last_reply_at: dict[tuple[str, int], float] = {}
 _last_account_reply_at: dict[str, float] = {}
 _last_react_at: dict[tuple[str, int], float] = {}
 _last_account_react_at: dict[str, float] = {}
-_chat_reactions_cache: dict[int, tuple[float, list[str]]] = {}
+_chat_reactions_cache: dict[tuple[str, int], tuple[float, list[str]]] = {}
 
 _POSITIVE_REACTIONS = [
     "❤️", "👍", "🔥", "🥰", "👏", "🤩", "🎉", "😁", "💯", "👌",
@@ -32,10 +32,11 @@ _NEGATIVE_REACTIONS = {
 }
 
 
-async def _get_available_positive_reactions(client: Client, chat_id: int) -> list[str]:
-    """Return positive reaction emojis allowed in *chat_id* (cached 5 min)."""
+async def _get_available_positive_reactions(client: Client, account_id: str, chat_id: int) -> list[str]:
+    """Return positive reaction emojis allowed in *chat_id* for *account_id* (cached 5 min)."""
     now = time.time()
-    cached = _chat_reactions_cache.get(chat_id)
+    ckey = (account_id, chat_id)
+    cached = _chat_reactions_cache.get(ckey)
     if cached and (now - cached[0]) < 300:
         return cached[1]
 
@@ -53,7 +54,6 @@ async def _get_available_positive_reactions(client: Client, chat_id: int) -> lis
                     if getattr(r, "emoji", None)
                 ]
                 if not chat_emojis:
-                    # Explicitly restricted to empty list -> reactions disabled
                     allowed = []
                 else:
                     pos = [e for e in chat_emojis if e in _POSITIVE_REACTIONS]
@@ -64,7 +64,7 @@ async def _get_available_positive_reactions(client: Client, chat_id: int) -> lis
         LOGGER.debug(f"Could not fetch available_reactions for {chat_id}: {exc}")
         allowed = list(_POSITIVE_REACTIONS)
 
-    _chat_reactions_cache[chat_id] = (now, allowed)
+    _chat_reactions_cache[ckey] = (now, allowed)
     return allowed
 
 
@@ -73,19 +73,19 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
     import random
 
     chat_id = message.chat.id
+    ckey = (account_id, chat_id)
     now = time.time()
     blocked_until = _last_account_react_at.get(account_id, 0.0)
     if blocked_until > now:
         return False
 
-    cached = _chat_reactions_cache.get(chat_id)
+    cached = _chat_reactions_cache.get(ckey)
     if cached and (now - cached[0]) < 300:
         choices = cached[1]
         if not choices:
             return False
         tried = [random.choice(choices)] + [e for e in _SAFE_FALLBACK_REACTIONS]
     else:
-        # Fire immediately with safe fast emojis without waiting for get_chat() RPC
         first = random.choice(_SAFE_FALLBACK_REACTIONS)
         tried = [first] + [e for e in _SAFE_FALLBACK_REACTIONS if e != first]
 
@@ -93,15 +93,14 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
         try:
             await client.send_reaction(chat_id, message.id, candidate)
             if not cached:
-                _chat_reactions_cache[chat_id] = (time.time(), list(_POSITIVE_REACTIONS))
+                _chat_reactions_cache[ckey] = (time.time(), list(_POSITIVE_REACTIONS))
             LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in group {chat_id}")
             return True
         except Exception as exc:  # noqa: BLE001
             name = type(exc).__name__.lower()
             err_s = str(exc).lower()
             if "reactioninvalid" in name or "reaction_invalid" in err_s:
-                # Fetch exact allowed emojis for this group once, then retry
-                allowed = await _get_available_positive_reactions(client, chat_id)
+                allowed = await _get_available_positive_reactions(client, account_id, chat_id)
                 for alt in allowed:
                     if alt not in tried:
                         try:
@@ -111,7 +110,6 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
                             continue
                 continue
             if any(k in name or k in err_s for k in ("peeridinvalid", "peer_id_invalid", "channelinvalid", "channel_invalid", "chatidinvalid")):
-                # Newly joined/created group peer not in local storage yet -> sync dialogs and retry
                 try:
                     async for _ in client.get_dialogs(limit=30):
                         pass
@@ -122,7 +120,7 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
                     LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction retry failed in {chat_id}: {retry_exc}")
                     return False
             if any(k in name or k in err_s for k in ("reactions_disabled", "chatwriteforbidden", "rightforbidden", "userbanned", "channelprivate")):
-                _chat_reactions_cache[chat_id] = (time.time(), [])
+                _chat_reactions_cache[ckey] = (time.time(), [])
                 return False
             if "flood" in name or "peerflood" in name:
                 wait_s = float(getattr(exc, "value", 60) or 60)
@@ -131,7 +129,6 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
                 return False
             LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction failed in {chat_id} ({candidate}): {exc}")
             return False
-    _chat_reactions_cache[chat_id] = (time.time(), [])
     return False
 
 
@@ -365,7 +362,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
             from Myra.services.broadcast import invalidate_dialog_cache, is_chat_cached
             if not is_chat_cached(account_id, message.chat.id):
                 invalidate_dialog_cache(account_id)
-                _chat_reactions_cache.pop(message.chat.id, None)
+                _chat_reactions_cache.pop((account_id, message.chat.id), None)
         except Exception:
             pass
 
@@ -558,7 +555,7 @@ async def register_userbot_handlers(client: Client, account_id: str):
             try:
                 from Myra.services.broadcast import invalidate_dialog_cache
                 invalidate_dialog_cache(account_id)
-                _chat_reactions_cache.pop(message.chat.id, None)
+                _chat_reactions_cache.pop((account_id, message.chat.id), None)
                 LOGGER.info(f"🆕 Userbot ({account_id}) joined group {message.chat.id} — dialogs auto-synced")
             except Exception:
                 pass
