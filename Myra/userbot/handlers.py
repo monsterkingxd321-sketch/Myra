@@ -110,6 +110,17 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
                         except Exception:
                             continue
                 continue
+            if any(k in name or k in err_s for k in ("peeridinvalid", "peer_id_invalid", "channelinvalid", "channel_invalid", "chatidinvalid")):
+                # Newly joined/created group peer not in local storage yet -> sync dialogs and retry
+                try:
+                    async for _ in client.get_dialogs(limit=30):
+                        pass
+                    await client.send_reaction(chat_id, message.id, candidate)
+                    LOGGER.info(f"✨ Userbot ({account_id}) reacted {candidate} in {chat_id} after peer sync")
+                    return True
+                except Exception as retry_exc:  # noqa: BLE001
+                    LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction retry failed in {chat_id}: {retry_exc}")
+                    return False
             if any(k in name or k in err_s for k in ("reactions_disabled", "chatwriteforbidden", "rightforbidden", "userbanned", "channelprivate")):
                 _chat_reactions_cache[chat_id] = (time.time(), [])
                 return False

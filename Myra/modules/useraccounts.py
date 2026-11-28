@@ -1036,7 +1036,11 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
     if data.startswith(("ub_all_ac:", "ub_all_action:", "ub_all_gmode:", "ub_all_scope:", "ub_all_speed:")) or data == "ub_all_restart":
         if not await is_admin(user_id):
             return await query.answer("❌ Unauthorized.", show_alert=True)
-        target_accs = await get_served_accounts() if is_owner(user_id) else await get_accounts_by_user(user_id)
+        if is_owner(user_id):
+            from Myra.userbot.storage import get_all_served_accounts
+            target_accs = await get_all_served_accounts()
+        else:
+            target_accs = await get_accounts_by_user(user_id)
         # Ensure all live in-memory accounts owned by this viewer are also included
         seen_ids = {a["account_id"] for a in target_accs}
         for aid, acc_mem in list(ub_accounts.items()):
@@ -1050,16 +1054,21 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             state = data.split(":", 1)[1] == "on"
             for a in target_accs:
                 aid = a["account_id"]
+                sc = (ub_accounts.get(aid) or a).get("scope")
                 if aid in ub_accounts:
                     ub_accounts[aid]["autochat"] = state
                     ub_accounts[aid]["auto_enabled"] = state
-                await update_account(aid, {"autochat": state, "auto_enabled": state})
+                await update_account(aid, {"autochat": state, "auto_enabled": state}, scope=sc)
                 count += 1
             alert = f"AutoChat {'ON' if state else 'OFF'} for {count} userbot(s)!"
         elif data.startswith("ub_all_action:"):
             mode = data.split(":", 1)[1]
             for a in target_accs:
-                await userbot_manager.set_action_mode(a["account_id"], mode)
+                aid = a["account_id"]
+                sc = (ub_accounts.get(aid) or a).get("scope")
+                if aid in ub_accounts:
+                    ub_accounts[aid]["action_mode"] = mode
+                await update_account(aid, {"action_mode": mode}, scope=sc)
                 count += 1
             try:
                 from Myra.userbot.handlers import _chat_reactions_cache, _last_account_react_at
