@@ -101,8 +101,9 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
             if "flood" in name or "peerflood" in name:
                 wait_s = float(getattr(exc, "value", 60) or 60)
                 _last_account_react_at[account_id] = time.time() + min(wait_s, 300.0)
+                LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction flood in {chat_id}: {exc}")
                 return False
-            LOGGER.debug(f"Userbot ({account_id}) reaction failed in {chat_id}: {exc}")
+            LOGGER.warning(f"⚠️ Userbot ({account_id}) reaction failed in {chat_id} ({candidate}): {exc}")
             return False
     _chat_reactions_cache[chat_id] = (time.time(), [])
     return False

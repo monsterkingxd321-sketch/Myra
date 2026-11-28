@@ -124,33 +124,20 @@ async def _main_panel() -> tuple[str, InlineKeyboardMarkup]:
         db,
         chats_list,
         users_list,
-        audience,
         clones_list,
-        bot_interval,
-        bot_targets,
-        ub_interval,
-        ub_targets,
     ) = await asyncio.gather(
         _safe(ac.get_bot_enabled(), False),
         _safe(ac.get_ub_enabled(), False),
         _safe(training.get_stats(), {}),
         _safe(get_served_chats(), []),
         _safe(get_served_users(), []),
-        _safe(userstats.collect(), {}),
         _safe(clone_manager.list_clones(), []),
-        _safe(ac.get_bot_interval(), 0),
-        _safe(ac.get_bot_targets(), "both"),
-        _safe(ac.get_ub_interval(), 0),
-        _safe(ac.get_ub_targets(), "both"),
     )
 
     ai = ai_status()
     chats = len(chats_list)
     users = len(users_list)
-    totals = (audience or {}).get("totals", {})
     my_accounts = _my_accounts()
-    admins_list = await adminsdb.get_admins()
-    owner_str = str(config.OWNER_ID) if config.OWNER_ID else "Default"
     clones = len(clones_list)
 
     text = (
@@ -945,8 +932,21 @@ async def admin_panel_cmd(_, m: Message):
     if m.chat.type != ChatType.PRIVATE:
         return await m.reply("❌ Please use `/admin` in my private chat.")
 
-    text, markup = await _main_panel()
-    await m.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+    try:
+        text, markup = await asyncio.wait_for(_main_panel(), timeout=6.0)
+        await m.reply_text(text, reply_markup=markup, disable_web_page_preview=True)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.error(f"/admin failed: {exc}")
+        await m.reply_text(
+            "Admin Panel loaded with minimal fallback (database slow).",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("Userbots", callback_data="ad_userbots"),
+                    InlineKeyboardButton("Clones", callback_data="ad_clones"),
+                ],
+                [InlineKeyboardButton("Refresh", callback_data="ad_main")],
+            ]),
+        )
 
 
 @Myra.on_cmd(["broadcast", "bc"])

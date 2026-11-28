@@ -203,7 +203,16 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
         notify_str = "ON" if notify_enabled else "OFF"
 
         keyboard_rows.append([
-            InlineKeyboardButton("Manage All", callback_data="ub_all_panel"),
+            InlineKeyboardButton("All: React Only", callback_data="ub_all_action:react"),
+            InlineKeyboardButton("All: Chat Only", callback_data="ub_all_action:chat"),
+            InlineKeyboardButton("All: Chat+React", callback_data="ub_all_action:both"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton("All: Group All Msgs", callback_data="ub_all_gmode:all"),
+            InlineKeyboardButton("All: Tag Only", callback_data="ub_all_gmode:mention"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton("All Settings (Bulk)", callback_data="ub_all_panel"),
             InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
         ])
         keyboard_rows.append([
@@ -289,7 +298,16 @@ async def _build_main_dashboard(viewer_id: int) -> tuple[str, InlineKeyboardMark
             keyboard_rows.append([InlineKeyboardButton(btn_text, callback_data=f"ub_panel:{account_id}")])
 
         keyboard_rows.append([
-            InlineKeyboardButton("Manage All", callback_data="ub_all_panel"),
+            InlineKeyboardButton("All: React Only", callback_data="ub_all_action:react"),
+            InlineKeyboardButton("All: Chat Only", callback_data="ub_all_action:chat"),
+            InlineKeyboardButton("All: Chat+React", callback_data="ub_all_action:both"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton("All: Group All Msgs", callback_data="ub_all_gmode:all"),
+            InlineKeyboardButton("All: Tag Only", callback_data="ub_all_gmode:mention"),
+        ])
+        keyboard_rows.append([
+            InlineKeyboardButton("All Settings (Bulk)", callback_data="ub_all_panel"),
             InlineKeyboardButton("Add Userbot", callback_data="ub_add"),
         ])
         keyboard_rows.append([
@@ -1003,7 +1021,11 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
     if data == "ub_all_panel":
         if not await is_admin(user_id):
             return await query.answer("❌ Unauthorized.", show_alert=True)
-        text, markup = await _build_all_userbots_panel(user_id)
+        cur_text = (query.message.text or "") if query.message else ""
+        if "Manage All Userbots" in cur_text:
+            text, markup = await _build_all_userbots_panel(user_id)
+        else:
+            text, markup = await _build_main_dashboard(user_id)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         except Exception:
@@ -1015,6 +1037,11 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
         if not await is_admin(user_id):
             return await query.answer("❌ Unauthorized.", show_alert=True)
         target_accs = await get_served_accounts() if is_owner(user_id) else await get_accounts_by_user(user_id)
+        # Ensure all live in-memory accounts owned by this viewer are also included
+        seen_ids = {a["account_id"] for a in target_accs}
+        for aid, acc_mem in list(ub_accounts.items()):
+            if aid not in seen_ids and (is_owner(user_id) or acc_mem.get("added_by") == user_id):
+                target_accs.append({"account_id": aid, **acc_mem})
         if not target_accs:
             return await query.answer("No userbot accounts found.", show_alert=True)
 
@@ -1034,6 +1061,12 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
             for a in target_accs:
                 await userbot_manager.set_action_mode(a["account_id"], mode)
                 count += 1
+            try:
+                from Myra.userbot.handlers import _chat_reactions_cache, _last_account_react_at
+                _chat_reactions_cache.clear()
+                _last_account_react_at.clear()
+            except Exception:
+                pass
             labels = {"chat": "Chat Only", "react": "React Only", "both": "Chat + React"}
             alert = f"Mode '{labels.get(mode, mode)}' set for {count} userbot(s)!"
         elif data.startswith("ub_all_gmode:"):
@@ -1063,7 +1096,11 @@ async def useraccounts_callbacks(client: Myra, query: CallbackQuery):
                     count += 1
             alert = f"Restarted {count}/{len(target_accs)} userbot(s)!"
 
-        text, markup = await _build_all_userbots_panel(user_id)
+        cur_text = (query.message.text or "") if query.message else ""
+        if "Manage All Userbots" in cur_text:
+            text, markup = await _build_all_userbots_panel(user_id)
+        else:
+            text, markup = await _build_main_dashboard(user_id)
         try:
             await query.message.edit_text(text, reply_markup=markup, disable_web_page_preview=True)
         except Exception:
