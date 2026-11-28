@@ -312,9 +312,7 @@ class AutoChatService:
 
                 self._ub_next[account_id] = now + self._jitter(settings["interval"])
 
-            targets = await userbot_targets(client, account_id, settings["targets"], force=force)
-            if not targets and not force:
-                targets = await userbot_targets(client, account_id, settings["targets"], force=True)
+            targets = await userbot_targets(client, account_id, settings["targets"], force=True)
             if not targets:
                 LOGGER.info(f"⏰ AutoChat userbot [{account_id}] has 0 target groups/chats (mode={settings['targets']})")
                 return

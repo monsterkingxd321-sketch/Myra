@@ -229,6 +229,21 @@ async def userbot_dialogs(
     return data
 
 
+def invalidate_dialog_cache(account_id: str = None) -> None:
+    """Clear cached dialogs for one userbot (or all) so newly joined groups are seen."""
+    if account_id is None:
+        _DIALOG_CACHE.clear()
+    else:
+        _DIALOG_CACHE.pop(account_id, None)
+
+
+def is_chat_cached(account_id: str, chat_id: int) -> bool:
+    cached = _DIALOG_CACHE.get(account_id)
+    if not cached:
+        return True  # not cached yet; will be fetched on next call
+    return chat_id in cached.get("groups", [])
+
+
 async def userbot_targets(client: Client, account_id: str, kind: str, force: bool = False) -> list:
     data = await userbot_dialogs(client, account_id, force=force)
     if kind == "groups":

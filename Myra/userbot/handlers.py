@@ -39,26 +39,28 @@ async def _get_available_positive_reactions(client: Client, chat_id: int) -> lis
     if cached and (now - cached[0]) < 300:
         return cached[1]
 
-    allowed = list(_POSITIVE_REACTIONS)
+    allowed = []
     try:
         chat = await client.get_chat(chat_id)
         avail = getattr(chat, "available_reactions", None)
-        if avail is not None:
-            if getattr(avail, "all_are_enabled", False):
-                allowed = list(_POSITIVE_REACTIONS)
-            elif getattr(avail, "reactions", None):
-                chat_emojis = [
-                    getattr(r, "emoji", None)
-                    for r in avail.reactions
-                    if getattr(r, "emoji", None)
-                ]
-                pos = [e for e in chat_emojis if e in _POSITIVE_REACTIONS]
-                if not pos:
-                    pos = [e for e in chat_emojis if e not in _NEGATIVE_REACTIONS]
-                if pos:
-                    allowed = pos
+        if avail is None:
+            # Reactions disabled in this group (ChatReactionsNone)
+            allowed = []
+        elif getattr(avail, "all_are_enabled", False):
+            allowed = list(_POSITIVE_REACTIONS)
+        elif getattr(avail, "reactions", None):
+            chat_emojis = [
+                getattr(r, "emoji", None)
+                for r in avail.reactions
+                if getattr(r, "emoji", None)
+            ]
+            pos = [e for e in chat_emojis if e in _POSITIVE_REACTIONS]
+            if not pos:
+                pos = [e for e in chat_emojis if e not in _NEGATIVE_REACTIONS]
+            allowed = pos
     except Exception as exc:  # noqa: BLE001
         LOGGER.debug(f"Could not fetch available_reactions for {chat_id}: {exc}")
+        allowed = []
 
     _chat_reactions_cache[chat_id] = (now, allowed)
     return allowed
@@ -96,11 +98,15 @@ async def _react_to_group_message(client: Client, message: Message, account_id: 
             if "reactioninvalid" in name or "reaction_invalid" in err_s:
                 _chat_reactions_cache.pop(chat_id, None)
                 continue
+            if any(k in name or k in err_s for k in ("reactions_disabled", "chatwriteforbidden", "rightforbidden", "userbanned", "channelprivate")):
+                _chat_reactions_cache[chat_id] = (time.time(), [])
+                return False
             if "flood" in name or "peerflood" in name:
                 _last_account_react_at[account_id] = time.time() + 120.0
                 return False
             LOGGER.debug(f"Userbot ({account_id}) reaction failed in {chat_id}: {exc}")
             return False
+    _chat_reactions_cache[chat_id] = (time.time(), [])
     return False
 
 
@@ -338,6 +344,15 @@ async def register_userbot_handlers(client: Client, account_id: str):
         my_id = account["telegram_id"]
         my_username = account.get("username", "")
 
+        # Auto-sync newly joined groups (via addlist / invite link) without manual restart
+        try:
+            from Myra.services.broadcast import invalidate_dialog_cache, is_chat_cached
+            if not is_chat_cached(account_id, message.chat.id):
+                invalidate_dialog_cache(account_id)
+                _chat_reactions_cache.pop(message.chat.id, None)
+        except Exception:
+            pass
+
         # ── 2. ONLY REAL USERS ───────────────────────────────────────────
         # Ignore our own messages, every bot (including the main bot), our
         # other userbot accounts, channel posts and anonymous admins.
@@ -508,10 +523,28 @@ async def register_userbot_handlers(client: Client, account_id: str):
             except Exception as e:
                 LOGGER.error(f"⚠️ Userbot ({account_id}) private reply error: {e}")
 
+    async def group_join_sync_handler(c: Client, message: Message):
+        """Auto-refresh dialog cache when userbot joins a new group via addlist or invite link."""
+        account = ub_accounts.get(account_id)
+        if not account:
+            return
+        my_id = account.get("telegram_id")
+        joined = getattr(message, "new_chat_members", None) or []
+        if any(getattr(u, "id", None) == my_id for u in joined):
+            try:
+                from Myra.services.broadcast import invalidate_dialog_cache
+                invalidate_dialog_cache(account_id)
+                _chat_reactions_cache.pop(message.chat.id, None)
+                LOGGER.info(f"🆕 Userbot ({account_id}) joined group {message.chat.id} — dialogs auto-synced")
+            except Exception:
+                pass
+
     # Register handlers directly on client using MessageHandler
     group_filter = filters.group & ~filters.service
+    join_filter = filters.group & filters.new_chat_members
     private_filter = filters.private & (filters.text | filters.sticker)
 
     client.add_handler(MessageHandler(_within_scope(group_autochat_handler), group_filter), group=1)
     client.add_handler(MessageHandler(_within_scope(private_autochat_handler), private_filter), group=2)
+    client.add_handler(MessageHandler(_within_scope(group_join_sync_handler), join_filter), group=3)
     LOGGER.info(f"✅ Handlers registered successfully for userbot {account_id}")
